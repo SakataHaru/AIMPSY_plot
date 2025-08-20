@@ -415,35 +415,174 @@ print(p)
 ggsave("output/link/300C-CNS_transmission_cap_asia.png", p,
        width = 180, height = 110, units = "mm", dpi = 300, bg = "white")
 # -------------------------------------------------------------------------
+# 
+# # 1) 読み込み
+# g <- st_read("C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson", quiet = TRUE)
+# 
+# # 2) properties の経緯度から POINT を作成（WGS84）
+# pts <- g %>%
+#   st_drop_geometry() %>%
+#   st_as_sf(coords = c("centroid_x", "centroid_y"), crs = 4326)
+# 
+# # 3) 世界地図（WGS84に統一）
+# world <- ne_countries(scale = "medium", returnclass = "sf")
+# if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
+# pts  <- st_transform(pts, 4326)
+# world <- st_transform(world, 4326)
+# 
+# # 4) アジア範囲で切り出し（任意：描画を軽くする）
+# asia_bbox <- st_bbox(c(xmin = 40, xmax = 150, ymin = -20, ymax = 60), crs = st_crs(4326))
+# pts_asia   <- st_crop(pts,   asia_bbox)
+# world_asia <- st_crop(world, asia_bbox)
+# 
+# # 5) プロット（投影は変えず、度のまま xlim/ylim を指定）
+# p <- ggplot() +
+#   geom_sf(data = world_asia, fill = NA, color = "gray80", linewidth = 0.3) +
+#   geom_sf(data = pts_asia, size = 0.6, alpha = 0.9) +  # 点を小さく
+#   coord_sf(xlim = c(60, 150), ylim = c(-10, 60), expand = FALSE) +
+#   theme_void() +
+#   labs(title = "Transmission Capacity (GW)")
+# 
+# print(p)
+# 
+# ggsave("output/link/points_asia.png", p,
+#        width = 130, height = 100, units = "mm", dpi = 300, bg = "white")
 
-# 1) 読み込み
-g <- st_read("C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson", quiet = TRUE)
 
-# 2) properties の経緯度から POINT を作成（WGS84）
-pts <- g %>%
+
+# Global interconnection capacity ------------------------------------------------
+
+#300C_ADV
+# === 1) ノード座標を用意 ===
+g_nodes <- st_read("C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+                   quiet = TRUE)
+
+nodes_tbl <- g_nodes %>%
   st_drop_geometry() %>%
-  st_as_sf(coords = c("centroid_x", "centroid_y"), crs = 4326)
+  transmute(N_PSY,
+            lon = as.numeric(centroid_x),
+            lat = as.numeric(centroid_y))
 
-# 3) 世界地図（WGS84に統一）
-world <- ne_countries(scale = "medium", returnclass = "sf")
+# === 2) エッジ(送電線)に座標を結合 ===
+# N0/N1に "-AC" が残っている可能性があれば消す
+ddir <- "C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/Global"
+df_lnkcap_ADV <- rgdx.param(str_c(ddir,'/gdx_primary/300C+/2050.gdx'),'vfs_l') %>% 
+  mutate(across(where(is.factor),~as.character(.))) %>%
+  filter(str_detect(L,'.*-AC_.*-AC$'))%>% 
+  rename(Value="vfs_l") %>% 
+  separate(L,sep='_',into=c('N0','N1'),remove=FALSE) %>% 
+  mutate(N0 = str_remove(N0, "-AC"), N1 = str_remove(N1, "-AC"))
+
+edges <- df_lnkcap_ADV %>%
+  mutate(N0 = str_remove_all(N0, "-AC"),
+         N1 = str_remove_all(N1, "-AC")) %>%
+  left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+  rename(x0 = lon, y0 = lat) %>%
+  left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+  rename(x1 = lon, y1 = lat) %>%
+  # 座標が欠ける行は落とす
+  filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
+
+# === 3) 2点からLINESTRINGを作成（WGS84） ===
+lines_sfc <- pmap(
+  edges[, c("x0","y0","x1","y1")],
+  ~ st_linestring(matrix(c(..1, ..2,  # (x0, y0)
+                           ..3, ..4), # (x1, y1)
+                         ncol = 2, byrow = TRUE))
+)
+
+edges_sf <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+
+# === 4) 背景地図（世界全体）と重ねて描画 ===
+world  <- ne_countries(scale = "medium", returnclass = "sf")
 if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
-pts  <- st_transform(pts, 4326)
-world <- st_transform(world, 4326)
 
-# 4) アジア範囲で切り出し（任意：描画を軽くする）
-asia_bbox <- st_bbox(c(xmin = 40, xmax = 150, ymin = -20, ymax = 60), crs = st_crs(4326))
-pts_asia   <- st_crop(pts,   asia_bbox)
-world_asia <- st_crop(world, asia_bbox)
-
-# 5) プロット（投影は変えず、度のまま xlim/ylim を指定）
+# 背景地図 & プロット
 p <- ggplot() +
-  geom_sf(data = world_asia, fill = NA, color = "gray80", linewidth = 0.3) +
-  geom_sf(data = pts_asia, size = 0.6, alpha = 0.9) +  # 点を小さく
-  coord_sf(xlim = c(60, 150), ylim = c(-10, 60), expand = FALSE) +
+  geom_sf(data = world, fill = NA, color = "black", linewidth = 0.3) +
+  geom_sf(data = edges_sf,
+          aes(linewidth = Value), color = "indianred3", alpha = 0.8) +
+  scale_linewidth_continuous(
+    range  = c(0.2, 2.2),
+    breaks = seq(0, ceiling(max(edges_sf$Value) / 25) * 25, 25)
+  ) +
+  coord_sf(
+    ylim = c(-60, 75),  # ←⭐ここで緯度制限（極域をカット）
+    expand = FALSE
+  ) +
   theme_void() +
-  labs(title = "Transmission Capacity (GW)")
+  labs(title = "300C-CNS Transmission capacity (GW)")
 
 print(p)
 
-ggsave("output/link/points_asia.png", p,
-       width = 130, height = 100, units = "mm", dpi = 300, bg = "white")
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link/global_300C-ADV_transmission_cap.png", p,
+       width = 300, height = 130, units = "mm", dpi = 300, bg = "white")
+
+
+#300C_CNS
+# === 1) ノード座標を用意 ===
+g_nodes <- st_read("C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+                   quiet = TRUE)
+
+nodes_tbl <- g_nodes %>%
+  st_drop_geometry() %>%
+  transmute(N_PSY,
+            lon = as.numeric(centroid_x),
+            lat = as.numeric(centroid_y))
+
+# === 2) エッジ(送電線)に座標を結合 ===
+# N0/N1に "-AC" が残っている可能性があれば消す
+ddir <- "C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/global"
+df_lnkcap_CNS <- rgdx.param(str_c(ddir,'/gdx_primary/300C-/2050.gdx'),'vfs_l') %>% 
+  mutate(across(where(is.factor),~as.character(.))) %>%
+  filter(str_detect(L,'.*-AC_.*-AC$'))%>% 
+  rename(Value="vfs_l") %>% 
+  separate(L,sep='_',into=c('N0','N1'),remove=FALSE) %>% 
+  mutate(N0 = str_remove(N0, "-AC"), N1 = str_remove(N1, "-AC"))
+
+edges <- df_lnkcap_CNS %>%
+  mutate(N0 = str_remove_all(N0, "-AC"),
+         N1 = str_remove_all(N1, "-AC")) %>%
+  left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+  rename(x0 = lon, y0 = lat) %>%
+  left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+  rename(x1 = lon, y1 = lat) %>%
+  # 座標が欠ける行は落とす
+  filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
+
+# === 3) 2点からLINESTRINGを作成（WGS84） ===
+lines_sfc <- pmap(
+  edges[, c("x0","y0","x1","y1")],
+  ~ st_linestring(matrix(c(..1, ..2,  # (x0, y0)
+                           ..3, ..4), # (x1, y1)
+                         ncol = 2, byrow = TRUE))
+)
+
+edges_sf <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+
+# === 4) 背景地図（世界全体）と重ねて描画 ===
+world  <- ne_countries(scale = "medium", returnclass = "sf")
+if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
+
+# 背景地図 & プロット
+p <- ggplot() +
+  geom_sf(data = world, fill = NA, color = "black", linewidth = 0.3) +
+  geom_sf(data = edges_sf,
+          aes(linewidth = Value), color = "royalblue4", alpha = 0.8) +
+  scale_linewidth_continuous(
+    range  = c(0.2, 2.2),
+    breaks = seq(0, ceiling(max(edges_sf$Value) / 25) * 25, 25)
+  ) +
+  coord_sf(
+    ylim = c(-60, 75),  # ←⭐ここで緯度制限（極域をカット）
+    expand = FALSE
+  ) +
+  theme_void() +
+  labs(title = "300C-CNS Transmission capacity (GW)")
+
+print(p)
+
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link/global_300C-CNS_transmission_cap.png", p,
+       width = 300, height = 130, units = "mm", dpi = 300, bg = "white")
