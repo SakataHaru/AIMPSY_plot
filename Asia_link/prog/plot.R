@@ -33,11 +33,15 @@ library(tibble)
 # setting -----------------------------------------------------------------
 
 aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
-scenario <- 'global2050'
+scenario <- 'asg2050'
+reg_in <- 'Global'
+date <- '2508191227'
 
 cdir <- getwd()
 pdir <- paste0(cdir,'/prog/inc_prog')
 odir <- paste0(cdir,'/output/TR_China')
+ddir <- paste0(aimpsy,'/',scenario,'/',reg_in,'/',date)  # output path
+
 basedir <- 'AIMPSY-master'
 plot_year <- '2050'
 #time_resol <- '12DAY'
@@ -56,76 +60,6 @@ Sys.setlocale("LC_TIME", "en_US.UTF-8")
 
 
 # import data -------------------------------------------------------------
-
-# crossover:on ------------------------------------------------------------
-time_resol <- '3HOUR'
-reg_in <- 'ASIA'
-# date <- '2508032013'
-# ddir <- paste0(aimpsy,'/',scenario,'/',reg_in,'/',date)  # output path
-ddir <- "C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/Asia_link/3HOUR/300C_ADV"
-
-gams_sys_dir <- system("which gams --skip-alias|xargs dirname", intern = TRUE)
-igdx(gams_sys_dir)
-
-options(bitmapType='cairo')
-
-year_all <- seq(2020,2050,by=5)
-Asia_list <- c("JPN", "CHN", "KOR", "IND", "IDN",  
-               "THA", "MYS", "VNM", "XSE", "XSA", "XEA")
-
-df_ADV <- rgdx.param(str_c(ddir,'/main/merged_output.gdx'),'iamc_gdx') %>% 
-  rename(Scenario='Sc',Region='Sr',Variable='Sv',Year='Y5',Value='iamc_gdx') %>% 
-  mutate(Year=as.numeric(as.character(Year)),Region=as.character(Region),Scenario=as.character(Scenario)) %>% 
-  pivot_wider(names_from=Year,values_from=Value,values_fill=0) %>% 
-  pivot_longer(cols=-c(Scenario,Variable,Region),names_to='Year',values_to='Value') %>% 
-  pivot_wider(names_from=Variable,values_from=Value,values_fill=0) %>% 
-  pivot_longer(cols=-c(Scenario,Region,Year),names_to='Variable',values_to='Value') %>% 
-  filter(Value != 'N/A') %>% filter(!is.na(Value)) %>% 
-  mutate(Year=as.numeric(Year), Value=as.numeric(Value), link="ADV")%>% 
-  filter(Region%in%Asia_list)
-
-df_ADV_tot <- df_ADV %>%
-  group_by(Scenario, link, Variable, Year) %>%
-  summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
-  mutate(Region = "ASIA")  # 合算したことがわかる地域名
-
-# crossover:off  ------------------------------------------------------------
-time_resol <- '3HOUR'
-reg_in <- 'ASIA'
-# date <- '2507141451'
-# ddir <- paste0(aimpsy,'/',scenario,'/',reg_in,'/',date)  # output path
-ddir <- "C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/Asia_link/3HOUR/300C_CNS"
-
-df_CNS <- rgdx.param(str_c(ddir,'/main/merged_output.gdx'),'iamc_gdx') %>% 
-  rename(Scenario='Sc',Region='Sr',Variable='Sv',Year='Y5',Value='iamc_gdx') %>% 
-  mutate(Year=as.numeric(as.character(Year)),Region=as.character(Region),Scenario=as.character(Scenario)) %>% 
-  pivot_wider(names_from=Year,values_from=Value,values_fill=0) %>% 
-  pivot_longer(cols=-c(Scenario,Variable,Region),names_to='Year',values_to='Value') %>% 
-  pivot_wider(names_from=Variable,values_from=Value,values_fill=0) %>% 
-  pivot_longer(cols=-c(Scenario,Region,Year),names_to='Variable',values_to='Value') %>% 
-  filter(Value != 'N/A') %>% filter(!is.na(Value)) %>% 
-  mutate(Year=as.numeric(Year), Value=as.numeric(Value), link="CNS")%>% 
-  filter(Region%in%Asia_list)
-
-df_CNS_tot <- df_CNS %>%
-  group_by(Scenario, link, Variable, Year) %>%
-  summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
-  mutate(Region = "ASIA")  # 合算したことがわかる地域名
-
-# merge -------------------------------------------------------------------
-link_list <- c('CNS','ADV')
-
-df_link_ASIA <- bind_rows(df_CNS_tot, df_ADV_tot) %>%
-  filter(Scenario %in% c('300C-','300C+'),Region == 'ASIA') %>% 
-  mutate(link = factor(link, levels = link_list))
-
-set_Sv <- rgdx.set(str_c(ddir,'/main/merged_output.gdx'),'Sv',te=TRUE) %>% rename(GAMS.code=1,Template.code=2)
-set_Su <- rgdx.set(str_c(ddir,'/main/merged_output.gdx'),'Su',te=TRUE) %>% rename(GAMS.code=1,Unit=2)
-
-scen_mat <- read_csv(str_c(ddir,'/main/scenario_table.csv'))
-
-plt <- list()
-# source(str_c(cdir,'/',basedir,'/tools/Rplot/func_plot.R'))
 
 # Theme & Function --------------------------------------------------------
 
@@ -280,7 +214,7 @@ library(dplyr)
 
 
 
-# Interconnection capacity ------------------------------------------------
+# Asia  Interconnection capacity ------------------------------------------------
 
 #300C_ADV
 # === 1) ノード座標を用意 ===
@@ -454,7 +388,7 @@ ggsave("output/link/300C-CNS_transmission_cap_asia.png", p,
 
 #300C_ADV
 # === 1) ノード座標を用意 ===
-g_nodes <- st_read("C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+g_nodes <- st_read("C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
                    quiet = TRUE)
 
 nodes_tbl <- g_nodes %>%
@@ -586,3 +520,279 @@ print(p)
 # サイズを大きくする（幅×高さをmm単位で拡大）
 ggsave("output/link/global_300C-CNS_transmission_cap.png", p,
        width = 300, height = 130, units = "mm", dpi = 300, bg = "white")
+
+
+# linkの点線プロット -------------------------------------------------------------
+
+# === 1) ノード座標を用意 ===
+g_nodes <- st_read("C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+                   quiet = TRUE)
+
+nodes_tbl <- g_nodes %>%
+  st_drop_geometry() %>%
+  transmute(N_PSY,
+            lon = as.numeric(centroid_x),
+            lat = as.numeric(centroid_y))
+
+# === 2) エッジ(送電線)に座標を結合（text=='Y' のみ使う） ===
+# ddir <- "C:/Users/halra/OneDrive - Kyoto University/My work/AIM-PSY/global"
+df_lnkcap_CNS <- rgdx.set(str_c(ddir,'/gams_output/gdx_primary/300C+/2050.gdx'),'L') %>% 
+  mutate(across(where(is.factor), ~ as.character(.))) %>%
+  filter(str_detect(L_ALL, '.*-AC_.*-AC$')) %>% 
+  separate(L_ALL, sep = '_', into = c('N0','N1'), remove = FALSE) %>% 
+  mutate(N0 = str_remove_all(N0, "-AC"),
+         N1 = str_remove_all(N1, "-AC"))
+edges <- df_lnkcap_CNS %>%
+  left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+  rename(x0 = lon, y0 = lat) %>%
+  left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+  rename(x1 = lon, y1 = lat) %>%
+  filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
+
+# === 3) 2点から LINESTRING を作成（WGS84） ===
+lines_sfc <- pmap(
+  edges[, c("x0","y0","x1","y1")],
+  ~ st_linestring(matrix(c(..1, ..2,   # (x0, y0)
+                           ..3, ..4),  # (x1, y1)
+                         ncol = 2, byrow = TRUE))
+)
+edges_sf <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+
+# === 4) 背景地図（世界全体、極域カット）と重ねて描画 ===
+world <- ne_countries(scale = "medium", returnclass = "sf")
+if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
+
+# 背景地図 & プロット
+p <- ggplot() +
+  geom_sf(data = world, fill = NA, color = "black", linewidth = 0.3) +
+  geom_sf(data = edges_sf,
+          color = "grey50",        # グレー（やや中間色）
+          linewidth = 0.3,         # 細めに修正
+          linetype = "dotted",     # 点線
+          alpha = 0.9) +
+  coord_sf(ylim = c(-60, 75), expand = FALSE) +  # 極域を表示しない
+  theme_void() +
+  labs(title = "300C-CNS Transmission links (dotted grey, thin)")
+
+print(p)
+
+# 保存
+ggsave("output/link/global_300C-CNS_transmission_links_dotted.png", p,
+       width = 300, height = 130, units = "mm", dpi = 300, bg = "white")
+
+# 点線＋送電網容量プロット-------------------------------------------------------------------------
+
+# linkの点線プロット 
+# === 1) ノード座標を用意 ===
+g_nodes <- st_read("C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+                   quiet = TRUE)
+
+nodes_tbl <- g_nodes %>%
+  st_drop_geometry() %>%
+  transmute(N_PSY,
+            lon = as.numeric(centroid_x),
+            lat = as.numeric(centroid_y))
+
+# === 2) エッジ(送電線)に座標を結合（text=='Y' のみ使う） ===
+ddir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/Global"
+df_lnkcap_CNS <- rgdx.set(str_c(ddir,'/gams_output/gdx_primary/300C+/2050.gdx'),'L') %>% 
+  mutate(across(where(is.factor), ~ as.character(.))) %>%
+  filter(str_detect(L_ALL, '.*-AC_.*-AC$')) %>% 
+  separate(L_ALL, sep = '_', into = c('N0','N1'), remove = FALSE) %>% 
+  mutate(N0 = str_remove_all(N0, "-AC"),
+         N1 = str_remove_all(N1, "-AC"))
+edges <- df_lnkcap_CNS %>%
+  left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+  rename(x0 = lon, y0 = lat) %>%
+  left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+  rename(x1 = lon, y1 = lat) %>%
+  filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
+
+# === 3) 2点から LINESTRING を作成（WGS84） ===
+lines_sfc <- pmap(
+  edges[, c("x0","y0","x1","y1")],
+  ~ st_linestring(matrix(c(..1, ..2,   # (x0, y0)
+                           ..3, ..4),  # (x1, y1)
+                         ncol = 2, byrow = TRUE))
+)
+edges_sf_dot <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+
+# # === 4) 背景地図（世界全体、極域カット）と重ねて描画 ===
+# world <- ne_countries(scale = "medium", returnclass = "sf")
+# if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
+# 
+# # 背景地図 & プロット
+# p <- ggplot() +
+#   geom_sf(data = world, fill = NA, color = "black", linewidth = 0.3) +
+#   geom_sf(data = edges_sf_dot,
+#           color = "grey50",        # グレー（やや中間色）
+#           linewidth = 0.3,         # 細めに修正
+#           linetype = "dotted",     # 点線
+#           alpha = 0.9) +
+#   coord_sf(ylim = c(-60, 75), expand = FALSE) +  # 極域を表示しない
+#   theme_void() +
+#   labs(title = "300C-CNS Transmission links (dotted grey, thin)")
+# 
+# print(p)
+# 
+# # 保存
+# ggsave("output/link/global_300C-CNS_transmission_links_dotted.png", p,
+#        width = 300, height = 130, units = "mm", dpi = 300, bg = "white")
+
+
+#300C_ADV
+# === 1) ノード座標を用意 ===
+g_nodes <- st_read("C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+                   quiet = TRUE)
+
+nodes_tbl <- g_nodes %>%
+  st_drop_geometry() %>%
+  transmute(N_PSY,
+            lon = as.numeric(centroid_x),
+            lat = as.numeric(centroid_y))
+
+# === 2) エッジ(送電線)に座標を結合 ===
+# N0/N1に "-AC" が残っている可能性があれば消す
+ddir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/Global"
+df_lnkcap_ADV <- rgdx.param(str_c(ddir,'/gams_output/gdx_primary/300C+/2050.gdx'),'vfs_l') %>% 
+  mutate(across(where(is.factor),~as.character(.))) %>%
+  filter(str_detect(L,'.*-AC_.*-AC$'))%>% 
+  rename(Value="vfs_l") %>% 
+  separate(L,sep='_',into=c('N0','N1'),remove=FALSE) %>% 
+  mutate(N0 = str_remove(N0, "-AC"), N1 = str_remove(N1, "-AC"))
+
+edges <- df_lnkcap_ADV %>%
+  mutate(N0 = str_remove_all(N0, "-AC"),
+         N1 = str_remove_all(N1, "-AC")) %>%
+  left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+  rename(x0 = lon, y0 = lat) %>%
+  left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+  rename(x1 = lon, y1 = lat) %>%
+  # 座標が欠ける行は落とす
+  filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
+
+# === 3) 2点からLINESTRINGを作成（WGS84） ===
+lines_sfc <- pmap(
+  edges[, c("x0","y0","x1","y1")],
+  ~ st_linestring(matrix(c(..1, ..2,  # (x0, y0)
+                           ..3, ..4), # (x1, y1)
+                         ncol = 2, byrow = TRUE))
+)
+
+edges_sf_ADV <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+
+# === 4) 背景地図（世界全体）と重ねて描画 ===
+world  <- ne_countries(scale = "medium", returnclass = "sf")
+if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
+
+# 背景地図 & プロット
+p <- ggplot() +
+  geom_sf(data = world, fill = NA, color = "gray35", linewidth = 0.3) +
+  geom_sf(data = edges_sf_ADV,
+          aes(linewidth = Value), color = "indianred3", alpha = 0.8) +
+  scale_linewidth_continuous(
+    range  = c(0.2, 2.2),
+    breaks = seq(0, ceiling(max(edges_sf_ADV$Value) / 25) * 25, 25)
+  ) +
+  geom_sf(data = edges_sf_dot,
+          color = "grey50",        # グレー（やや中間色）
+          linewidth = 0.3,         # 細めに修正
+          linetype = "dotted",     # 点線
+          alpha = 0.9) +
+  coord_sf(
+    ylim = c(-60, 80),  # ←⭐ここで緯度制限（極域をカット）
+    expand = FALSE
+  ) +
+  theme_void() +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal", # 横並び
+        legend.title = element_blank()) +
+  guides(linewidth = guide_legend(nrow = 1)) +
+  labs(title = "300C-ADV Transmission capacity (GW)")
+
+print(p)
+
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link/global_300C-ADV_transmission_cap_dot.png", p,
+       width = 280, height = 140, units = "mm", dpi = 300, bg = "white")
+
+
+#300C_CNS
+# === 1) ノード座標を用意 ===
+g_nodes <- st_read("C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
+                   quiet = TRUE)
+
+nodes_tbl <- g_nodes %>%
+  st_drop_geometry() %>%
+  transmute(N_PSY,
+            lon = as.numeric(centroid_x),
+            lat = as.numeric(centroid_y))
+
+# === 2) エッジ(送電線)に座標を結合 ===
+# N0/N1に "-AC" が残っている可能性があれば消す
+ddir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/Global"
+df_lnkcap_CNS <- rgdx.param(str_c(ddir,'/gams_output/gdx_primary/300C-/2050.gdx'),'vfs_l') %>% 
+  mutate(across(where(is.factor),~as.character(.))) %>%
+  filter(str_detect(L,'.*-AC_.*-AC$'))%>% 
+  rename(Value="vfs_l") %>% 
+  separate(L,sep='_',into=c('N0','N1'),remove=FALSE) %>% 
+  mutate(N0 = str_remove(N0, "-AC"), N1 = str_remove(N1, "-AC"))
+
+edges <- df_lnkcap_CNS %>%
+  mutate(N0 = str_remove_all(N0, "-AC"),
+         N1 = str_remove_all(N1, "-AC")) %>%
+  left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+  rename(x0 = lon, y0 = lat) %>%
+  left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+  rename(x1 = lon, y1 = lat) %>%
+  # 座標が欠ける行は落とす
+  filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
+
+# === 3) 2点からLINESTRINGを作成（WGS84） ===
+lines_sfc <- pmap(
+  edges[, c("x0","y0","x1","y1")],
+  ~ st_linestring(matrix(c(..1, ..2,  # (x0, y0)
+                           ..3, ..4), # (x1, y1)
+                         ncol = 2, byrow = TRUE))
+)
+
+edges_sf_CNS <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+
+# === 4) 背景地図（世界全体）と重ねて描画 ===
+world  <- ne_countries(scale = "medium", returnclass = "sf")
+if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
+
+# 背景地図 & プロット
+p <- ggplot() +
+  geom_sf(data = world, fill = NA, color = "gray35", linewidth = 0.3) +
+  geom_sf(data = edges_sf_dot,
+          color = "grey50",        # グレー（やや中間色）
+          linewidth = 0.3,         # 細めに修正
+          linetype = "dotted",     # 点線
+          alpha = 0.9) +
+  geom_sf(data = edges_sf_CNS,
+          aes(linewidth = Value), color = "royalblue4", alpha = 0.8) +
+  scale_linewidth_continuous(
+    range  = c(0.2, 2.2),
+    breaks = seq(0, ceiling(max(edges_sf_CNS$Value) / 25) * 25, 25)
+  ) +
+  coord_sf(
+    ylim = c(-60, 75),  # ←⭐ここで緯度制限（極域をカット）
+    expand = FALSE
+  ) +
+  theme_void() +
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal", # 横並び
+        legend.title = element_blank()) +
+  guides(linewidth = guide_legend(nrow = 1)) +
+  labs(title = "300C-CNS Transmission capacity (GW)")
+
+print(p)
+
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link/global_300C-CNS_transmission_cap_dot.png", p,
+       width = 280, height = 140, units = "mm", dpi = 300, bg = "white")
+
+
+
+
