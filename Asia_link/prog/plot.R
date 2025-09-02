@@ -785,7 +785,7 @@ ggsave("output/link_global/global_300C-ADV_transmission_realvalue.png", p2,
 # -------------------------------------------------------------------------
 
 #300C_CNS
-# === 1) ノード座標を用意 ===
+#  1) ノード座標を用意 
 g_nodes <- st_read("C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson",
                    quiet = TRUE)
 
@@ -795,7 +795,7 @@ nodes_tbl <- g_nodes %>%
             lon = as.numeric(centroid_x),
             lat = as.numeric(centroid_y))
 
-# === 2) エッジ(送電線)に座標を結合 ===
+# 2) エッジ(送電線)に座標を結合 
 # N0/N1に "-AC" が残っている可能性があれば消す
 ddir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/Global"
 df_lnkcap_CNS <- rgdx.param(str_c(ddir,'/gams_output/gdx_primary/300C-/2050.gdx'),'vfs_l') %>% 
@@ -815,7 +815,7 @@ edges <- df_lnkcap_CNS %>%
   # 座標が欠ける行は落とす
   filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1))
 
-# === 3) 2点からLINESTRINGを作成（WGS84） ===
+# 3) 2点からLINESTRINGを作成（WGS84）
 lines_sfc <- pmap(
   edges[, c("x0","y0","x1","y1")],
   ~ st_linestring(matrix(c(..1, ..2,  # (x0, y0)
@@ -825,13 +825,13 @@ lines_sfc <- pmap(
 
 edges_sf_CNS <- st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
 
-# === 4) 背景地図（世界全体）と重ねて描画 ===
+# 4) 背景地図（世界全体）と重ねて描画 
 world  <- ne_countries(scale = "medium", returnclass = "sf")
 if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
 
 # 背景地図 & プロット
 
-# --- 範囲とブレーク（必要に応じて vmin を 25 に） ---
+#  範囲とブレーク（必要に応じて vmin を 25 に） 
 vmin <- 0
 vmax <- ceiling(max(edges_sf_CNS$Value, na.rm = TRUE) / 25) * 25
 brks <- seq(max(25, vmin), vmax, by = 25)
@@ -839,7 +839,7 @@ brks <- seq(max(25, vmin), vmax, by = 25)
 # 青系の段階色（ブレーク数に合わせて）
 cols <- colorRampPalette(c("#214d9a", "#6da1f3", "#6da1d9"))(length(brks))
 
-# --- 値を範囲 [vmin, vmax] にクランプ（NA も除去） ---
+#  値を範囲 [vmin, vmax] にクランプ（NA も除去） 
 edges_plot <- edges_sf_CNS %>%
   filter(!is.na(Value)) %>%
   mutate(Value2 = pmin(pmax(Value, vmin), vmax))
@@ -872,11 +872,13 @@ p <- ggplot() +
   theme_void() +
   theme(
     # 位置はお好みで。古い ggplot2 なら数値、3.5+ なら legend.position.inside を使用
-    legend.position      = c(0.14, 0.26),
+    legend.position      = c(0.08, 0.40),
     legend.direction     = "vertical",
     legend.background    = element_rect(fill = "white", color = "grey85"),
-    legend.key.width     = unit(7, "mm"),
-    legend.key.height    = unit(4, "mm"),
+    legend.title = element_text(size = 12),   # タイトル文字サイズ
+    legend.text  = element_text(size = 10),   # ラベル文字サイズ
+    legend.key.width  = unit(10, "mm"),       # 凡例キー幅
+    legend.key.height = unit(6, "mm"),         # 凡例キー高さ
     plot.title = element_text(hjust = 0.5) 
   ) +
   # “1つ” の凡例に統合（同じ name/breaks/limits を共有）
@@ -886,11 +888,11 @@ p <- ggplot() +
   ) +
   labs(title = "300C-CNS Transmission capacity (GW)")
 
-# --- 容量1GW以下だけ抽出 ---
+#  容量1GW以下だけ抽出 
 edges_lowcap <- edges_plot %>%
   filter(Value <= 1)
 
-# --- 元の図にオレンジの上書きを追加 ---
+#  元の図にオレンジの上書きを追加 
 p2 <- ggplot() +
   geom_sf(data = world,      fill = NA, color = "gray70", linewidth = 0.3) +
   geom_sf(data = edges_sf_dot, color = "grey40", linewidth = 0.3,
@@ -924,11 +926,13 @@ p2 <- ggplot() +
   theme_void() +
   theme(
     # 位置はお好みで。古い ggplot2 なら数値、3.5+ なら legend.position.inside を使用
-    legend.position      = c(0.14, 0.26),
+    legend.position      = c(0.08, 0.40),
     legend.direction     = "vertical",
     legend.background    = element_rect(fill = "white", color = "grey85"),
-    legend.key.width     = unit(7, "mm"),
-    legend.key.height    = unit(4, "mm"),
+    legend.title = element_text(size = 12),   # タイトル文字サイズ
+    legend.text  = element_text(size = 10),   # ラベル文字サイズ
+    legend.key.width  = unit(10, "mm"),       # 凡例キー幅
+    legend.key.height = unit(6, "mm"),         # 凡例キー高さ
     plot.title = element_text(hjust = 0.5) 
   ) +
   # “1つ” の凡例に統合（同じ name/breaks/limits を共有）
