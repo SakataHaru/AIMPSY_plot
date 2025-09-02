@@ -686,36 +686,103 @@ world  <- ne_countries(scale = "medium", returnclass = "sf")
 if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
 
 # 背景地図 & プロット
+
+# --- 範囲とブレーク（必要に応じて vmin を 25 に） ---
+vmin <- 0
+vmax <- ceiling(max(edges_sf_CNS$Value, na.rm = TRUE) / 25) * 25
+brks <- seq(max(25, vmin), vmax, by = 25)
+
+# 青系の段階色（ブレーク数に合わせて）
+cols <- colorRampPalette(c("indianred3", "lightsalmon3", "lightsalmon"))(length(brks))
+
+# --- 値を範囲 [vmin, vmax] にクランプ（NA も除去） ---
+edges_plot <- edges_sf_ADV %>%
+  filter(!is.na(Value)) %>%
+  mutate(Value2 = pmin(pmax(Value, vmin), vmax))
+
 p <- ggplot() +
-  geom_sf(data = world, fill = NA, color = "gray35", linewidth = 0.3) +
-  geom_sf(data = edges_sf_ADV,
-          aes(linewidth = Value), color = "indianred3", alpha = 0.8) +
+  geom_sf(data = world,      fill = NA, color = "gray70", linewidth = 0.3) +
+  geom_sf(data = edges_sf_dot, color = "grey40", linewidth = 0.3,
+          linetype = "dotted", alpha = 0.9) +
+  # 太さも色も同じ値（クランプ済み Value2）にマッピング
+  geom_sf(data = edges_plot, aes(linewidth = Value2, color = Value2), alpha = 0.9) +
+  
+  # 太さスケール（legend として表示）
   scale_linewidth_continuous(
-    range  = c(0.2, 2.2),
-    breaks = seq(0, ceiling(max(edges_sf_ADV$Value) / 25) * 25, 25)
+    range  = c(0.5, 3.0),
+    breaks = brks,
+    limits = c(vmin, vmax),
+    name   = "Capacity (GW)",
+    guide  = guide_legend()
   ) +
-  geom_sf(data = edges_sf_dot,
-          color = "grey50",        # グレー（やや中間色）
-          linewidth = 0.3,         # 細めに修正
-          linetype = "dotted",     # 点線
-          alpha = 0.9) +
-  coord_sf(
-    ylim = c(-60, 80),  # ←⭐ここで緯度制限（極域をカット）
-    expand = FALSE
+  # 色スケール（25GW刻みの段階色、legend 方式）
+  scale_color_stepsn(
+    colors = cols,
+    breaks = brks,
+    limits = c(vmin, vmax),
+    name   = "Capacity (GW)",
+    guide  = guide_legend()
   ) +
+  
+  coord_sf(ylim = c(-60, 75), expand = FALSE) +
   theme_void() +
-  theme(legend.position = "bottom",
-        legend.direction = "horizontal", # 横並び
-        legend.title = element_blank()) +
-  guides(linewidth = guide_legend(nrow = 1)) +
+  theme(
+    # 位置はお好みで。古い ggplot2 なら数値、3.5+ なら legend.position.inside を使用
+    legend.position      = c(0.14, 0.26),
+    legend.direction     = "vertical",
+    legend.background    = element_rect(fill = "white", color = "grey85"),
+    legend.key.width     = unit(7, "mm"),
+    legend.key.height    = unit(4, "mm"),
+    plot.title = element_text(hjust = 0.5) 
+  ) +
+  # “1つ” の凡例に統合（同じ name/breaks/limits を共有）
+  guides(
+    color     = guide_legend(ncol = 1, order = 1),
+    linewidth = guide_legend(ncol = 1, order = 1)
+  ) +
   labs(title = "300C-ADV Transmission capacity (GW)")
 
 print(p)
 
 # サイズを大きくする（幅×高さをmm単位で拡大）
-ggsave("output/link/global_300C-ADV_transmission_cap_dot.png", p,
-       width = 280, height = 140, units = "mm", dpi = 300, bg = "white")
+ggsave("output/link_global/global_300C-ADV_transmission_cap_dot.png", p,
+       width = 280, height = 120, units = "mm", dpi = 300, bg = "white")
 
+
+# ADV 容量の値を表示してみる ---------------------------------------------------------
+
+# 1) 中点ポイントを作成（lon/lat は単純平均）
+midpoints <- edges_sf_ADV %>%
+  st_drop_geometry() %>%
+  transmute(
+    lon = (x0 + x1)/2,
+    lat = (y0 + y1)/2,
+    Value,         # 元の容量
+    Value2 = pmin(pmax(Value, vmin), vmax)  # 図の線幅・色に合わせたクランプ後
+  ) %>%
+  # 50GW以下に絞る（ゼロやNAは除外）
+  filter(!is.na(Value), Value > 0, Value <= 25) %>%
+  mutate(
+    # ラベル表記：25GW刻みに合わせたいなら accuracy = 25
+    lbl = label_number(accuracy = 0.1)(Value)
+  ) %>%
+  st_as_sf(coords = c("lon", "lat"), crs = 4326)
+
+# 2) ラベルを描画（重なりは check_overlap で軽減）
+p2 <- p +
+  geom_sf_text(
+    data = midpoints,
+    aes(label = lbl),
+    size = 2.6,
+    color = "grey15",
+    check_overlap = TRUE
+  )
+
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link_global/global_300C-ADV_transmission_realvalue.png", p2,
+       width = 280, height = 120, units = "mm", dpi = 300, bg = "white")
+
+# -------------------------------------------------------------------------
 
 #300C_CNS
 # === 1) ノード座標を用意 ===
@@ -763,36 +830,152 @@ world  <- ne_countries(scale = "medium", returnclass = "sf")
 if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
 
 # 背景地図 & プロット
+
+# --- 範囲とブレーク（必要に応じて vmin を 25 に） ---
+vmin <- 0
+vmax <- ceiling(max(edges_sf_CNS$Value, na.rm = TRUE) / 25) * 25
+brks <- seq(max(25, vmin), vmax, by = 25)
+
+# 青系の段階色（ブレーク数に合わせて）
+cols <- colorRampPalette(c("#214d9a", "#6da1f3", "#6da1d9"))(length(brks))
+
+# --- 値を範囲 [vmin, vmax] にクランプ（NA も除去） ---
+edges_plot <- edges_sf_CNS %>%
+  filter(!is.na(Value)) %>%
+  mutate(Value2 = pmin(pmax(Value, vmin), vmax))
+
 p <- ggplot() +
-  geom_sf(data = world, fill = NA, color = "gray35", linewidth = 0.3) +
-  geom_sf(data = edges_sf_dot,
-          color = "grey50",        # グレー（やや中間色）
-          linewidth = 0.3,         # 細めに修正
-          linetype = "dotted",     # 点線
-          alpha = 0.9) +
-  geom_sf(data = edges_sf_CNS,
-          aes(linewidth = Value), color = "royalblue4", alpha = 0.8) +
+  geom_sf(data = world,      fill = NA, color = "gray70", linewidth = 0.3) +
+  geom_sf(data = edges_sf_dot, color = "grey40", linewidth = 0.3,
+          linetype = "dotted", alpha = 0.9) +
+  # 太さも色も同じ値（クランプ済み Value2）にマッピング
+  geom_sf(data = edges_plot, aes(linewidth = Value2, color = Value2), alpha = 0.9) +
+  
+  # 太さスケール（legend として表示）
   scale_linewidth_continuous(
-    range  = c(0.2, 2.2),
-    breaks = seq(0, ceiling(max(edges_sf_CNS$Value) / 25) * 25, 25)
+    range  = c(0.5, 3.0),
+    breaks = brks,
+    limits = c(vmin, vmax),
+    name   = "Capacity (GW)",
+    guide  = guide_legend()
   ) +
-  coord_sf(
-    ylim = c(-60, 75),  # ←⭐ここで緯度制限（極域をカット）
-    expand = FALSE
+  # 色スケール（25GW刻みの段階色、legend 方式）
+  scale_color_stepsn(
+    colors = cols,
+    breaks = brks,
+    limits = c(vmin, vmax),
+    name   = "Capacity (GW)",
+    guide  = guide_legend()
   ) +
+  
+  coord_sf(ylim = c(-60, 75), expand = FALSE) +
   theme_void() +
-  theme(legend.position = "bottom",
-        legend.direction = "horizontal", # 横並び
-        legend.title = element_blank()) +
-  guides(linewidth = guide_legend(nrow = 1)) +
+  theme(
+    # 位置はお好みで。古い ggplot2 なら数値、3.5+ なら legend.position.inside を使用
+    legend.position      = c(0.14, 0.26),
+    legend.direction     = "vertical",
+    legend.background    = element_rect(fill = "white", color = "grey85"),
+    legend.key.width     = unit(7, "mm"),
+    legend.key.height    = unit(4, "mm"),
+    plot.title = element_text(hjust = 0.5) 
+  ) +
+  # “1つ” の凡例に統合（同じ name/breaks/limits を共有）
+  guides(
+    color     = guide_legend(ncol = 1, order = 1),
+    linewidth = guide_legend(ncol = 1, order = 1)
+  ) +
   labs(title = "300C-CNS Transmission capacity (GW)")
 
-print(p)
+# --- 容量1GW以下だけ抽出 ---
+edges_lowcap <- edges_plot %>%
+  filter(Value <= 1)
+
+# --- 元の図にオレンジの上書きを追加 ---
+p2 <- ggplot() +
+  geom_sf(data = world,      fill = NA, color = "gray70", linewidth = 0.3) +
+  geom_sf(data = edges_sf_dot, color = "grey40", linewidth = 0.3,
+          linetype = "dotted", alpha = 0.9) +
+  # 太さも色も同じ値（クランプ済み Value2）にマッピング
+  geom_sf(data = edges_plot, aes(linewidth = Value2, color = Value2), alpha = 0.9) +
+  
+  # 太さスケール（legend として表示）
+  scale_linewidth_continuous(
+    range  = c(0.5, 3.0),
+    breaks = brks,
+    limits = c(vmin, vmax),
+    name   = "Capacity (GW)",
+    guide  = guide_legend()
+  ) +
+  # 色スケール（25GW刻みの段階色、legend 方式）
+  scale_color_stepsn(
+    colors = cols,
+    breaks = brks,
+    limits = c(vmin, vmax),
+    name   = "Capacity (GW)",
+    guide  = guide_legend()
+  ) +
+  geom_sf(
+    data = edges_lowcap,
+    color = "#FFB347",
+    linewidth = 0.8,    # 少し強調する太さ（お好みで）
+    alpha = 0.9
+  ) +
+  coord_sf(ylim = c(-60, 75), expand = FALSE) +
+  theme_void() +
+  theme(
+    # 位置はお好みで。古い ggplot2 なら数値、3.5+ なら legend.position.inside を使用
+    legend.position      = c(0.14, 0.26),
+    legend.direction     = "vertical",
+    legend.background    = element_rect(fill = "white", color = "grey85"),
+    legend.key.width     = unit(7, "mm"),
+    legend.key.height    = unit(4, "mm"),
+    plot.title = element_text(hjust = 0.5) 
+  ) +
+  # “1つ” の凡例に統合（同じ name/breaks/limits を共有）
+  guides(
+    color     = guide_legend(ncol = 1, order = 1),
+    linewidth = guide_legend(ncol = 1, order = 1)
+  ) +
+  labs(title = "300C-CNS Transmission capacity (GW)")
+
 
 # サイズを大きくする（幅×高さをmm単位で拡大）
-ggsave("output/link/global_300C-CNS_transmission_cap_dot.png", p,
-       width = 280, height = 140, units = "mm", dpi = 300, bg = "white")
+ggsave("output/link_global/global_300C-CNS_transmission_cap_dot.png", p,
+       width = 280, height = 120, units = "mm", dpi = 300, bg = "white")
+
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link_global/global_300C-CNS_transmission_cap_1GW.png", p2,
+       width = 280, height = 120, units = "mm", dpi = 300, bg = "white")
 
 
 
+# CNS 容量の値を表示してみる ---------------------------------------------------------
 
+# 1) 中点ポイントを作成（lon/lat は単純平均）
+midpoints <- edges_sf_CNS %>%
+  st_drop_geometry() %>%
+  transmute(
+    lon = (x0 + x1)/2,
+    lat = (y0 + y1)/2,
+    Value
+  ) %>%
+  filter(!is.na(Value), Value > 0, Value <= 25) %>%
+  mutate(
+    lbl = number(Value, accuracy = 0.1),        # 表示用ラベル
+    group = if_else(Value <= 1, "small", "normal")  # 色分け用カテゴリ
+  ) %>%
+  st_as_sf(coords = c("lon","lat"), crs = 4326)
+
+# 2) ラベルを描画（重なりは check_overlap で軽減）
+p2 <- p +
+  geom_sf_text(
+    data = midpoints,
+    aes(label = lbl),
+    size = 2.6,
+    color = "grey15",
+    check_overlap = TRUE
+  )
+
+# サイズを大きくする（幅×高さをmm単位で拡大）
+ggsave("output/link_global/global_300C-CNS_transmission_realvalue.png", p2,
+       width = 280, height = 120, units = "mm", dpi = 300, bg = "white")
