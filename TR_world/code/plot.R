@@ -319,7 +319,7 @@ g_secele <- df_secele %>%
   ggplot() +
   geom_bar(aes(x=TR,y=Value,fill=Variable),stat='identity') +
   scale_fill_manual(values=plt$Color,labels=plt$Legend,name='') +
-  facet_wrap(vars(Region),nrow=4,scales="free_y") +
+  facet_wrap(vars(Region),nrow=3,scales="free_y") +
   guides(fill=guide_legend(reverse=FALSE)) +
   labs(y=expression(paste('Power generation (EJ ',{yr^-1},')'))) +
   MyTheme +
@@ -330,7 +330,7 @@ g_secele <- df_secele %>%
     legend.title = element_blank())
 
 ggsave(filename='output/plot_power/world_secele.png',
-       plot=g_secele,width=230,height=400,units='mm',dpi=300,bg='white')
+       plot=g_secele,width=300,height=280,units='mm',dpi=300,bg='white')
 
 
 # setting  -------------------------------------------------------------
