@@ -76,9 +76,9 @@ psm_meta <- tribble(
   "XME",        "i_XME",   "2601291702",
   "AUS",        "i_AUS",   "2601290918",
   "XOC",        "i_XOC",   "2601290933",
-  "CAN",        "i_CAN",   "2601291256",
+  "CAN",        "i_CAN",   "2602271859",
   "USA",        "i_USA",   "2601291313",
-  "XE15",       "i_XE15",  "2601271544",
+  "XE15",       "i_XE15",  "2603021300",
   "XE10",       "i_XE10",  "2601271620",
   "XE3",        "i_XE3",   "2601271643",
   "TUR",        "i_TUR",   "2602031550",
@@ -88,7 +88,7 @@ psm_meta <- tribble(
   "RUS",        "i_RUS",   "2601271055",
   "MEX",        "i_MEX",   "2601271110",
   "BRA",        "i_BRA",   "2601271113",
- # "XLM",        "i_XLM",   "2601271130",
+  "XLM",        "i_XLM",   "2603021355",
   "ZAF",        "i_ZAF",   "2601261516",
   "XAF",        "i_XAF",   "2601261518",
   "XNF",        "i_XNF",   "2601261834"
@@ -617,11 +617,11 @@ category_info <- list(
 # ファイル名用のサニタイズ
 sanitize <- function(x) gsub("[/|\\\\: ]", "_", x)
 
-# # 地域一覧
-# regions <- df_all %>% 
-#   pull(Region) %>% 
-#   unique() %>% 
-#   sort()
+# 地域一覧
+regions <- df_all %>%
+  pull(Region) %>%
+  unique() %>%
+  sort()
 
 for (reg in regions) {
   base_dir <- file.path("output", sanitize(reg))
