@@ -1,8 +1,3 @@
-
-###########################################################################
-# setting
-###########################################################################
-
 # library -----------------------------------------------------------------
 
 # print R version
@@ -33,10 +28,10 @@ library(tibble)
 
 # import data-------------------------------------------------------------------------
 # 1) User settings (EDIT HERE)
-
-#AIMPSY
 aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
 scenario <- 'global2050'
+#AIMPSY
+
 
 cdir <- getwd()
 pdir <- paste0(cdir,'/prog/inc_prog')
@@ -78,7 +73,7 @@ psm_meta <- tribble(
   "XOC",        "i_XOC",   "2601290933",
   "CAN",        "i_CAN",   "2602271859",
   "USA",        "i_USA",   "2601291313",
-  "XE15",       "i_XE15",  "2603021300",
+  "XE15",       "i_XE15",  "2603051935",
   "XE10",       "i_XE10",  "2601271620",
   "XE3",        "i_XE3",   "2601271643",
   "TUR",        "i_TUR",   "2602031550",
@@ -88,7 +83,7 @@ psm_meta <- tribble(
   "RUS",        "i_RUS",   "2601271055",
   "MEX",        "i_MEX",   "2601271110",
   "BRA",        "i_BRA",   "2601271113",
-  "XLM",        "i_XLM",   "2603021355",
+  "XLM",        "i_XLM",   "2603052015",
   "ZAF",        "i_ZAF",   "2601261516",
   "XAF",        "i_XAF",   "2601261518",
   "XNF",        "i_XNF",   "2601261834"
@@ -334,12 +329,13 @@ ggsave(filename='output/plot_power/world_secele.png',
 
 
 # setting  -------------------------------------------------------------
-TR_list <- c("AIM-T", "PSM-6H")
+TR_list <- c("AIM-T", "PSM-6H","Regional")
 Region_list <- psm_meta %>% 
   pull(RegionLabel) %>%        # or pull(RegionLabel) でもOK
   unique()
-line_color <- c("AIM-T"="black","PSM-1H"="indianred1","PSM-3H"="deepskyblue1","PSM-4H"="darkgoldenrod1","PSM-6H"="chartreuse2")
-shape <- c("AIM-T"=16,"PSM-1H"=15,"PSM-3H"=17,"PSM-4H"=18,"PSM-6H"=4)
+line_color <- c("AIM-T"="black","PSM-1H"="indianred1","PSM-3H"="deepskyblue1",
+                "PSM-4H"="darkgoldenrod1","PSM-6H"="indianred1","Regional"="deepskyblue1")
+shape <- c("AIM-T"=16,"PSM-1H"=15,"PSM-3H"=17,"PSM-4H"=18,"PSM-6H"=4,"Regional"=17)
 
 
 # 特定項目の全地域統合版-------------------------------------------------------------------------
@@ -618,10 +614,12 @@ category_info <- list(
 sanitize <- function(x) gsub("[/|\\\\: ]", "_", x)
 
 # 地域一覧
-regions <- df_all %>%
-  pull(Region) %>%
-  unique() %>%
-  sort()
+# regions <- df_all %>%
+#   pull(Region) %>%
+#   unique() %>%
+#   sort()
+
+regions <- c("XE15","XLM")
 
 for (reg in regions) {
   base_dir <- file.path("output", sanitize(reg))
@@ -1013,3 +1011,703 @@ for (var in target_vars) {
     bg     = "white"
   )
 }
+
+
+
+
+# Asia 特定項目の全地域統合版-------------------------------------------------------------------------
+
+
+Region_list <- c("JPN", "CHN", "IND", "IDN", "KOR", "THA", "MYS", "VNM",
+                 "XSE", "XSA", "XEA")
+
+aimpsy   <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+scenario <- "global2050"
+ddir     <- file.path(aimpsy, scenario, "Asia", "2603061557")
+
+# 0) Regional データの読み込みと整形
+df_regional <- rgdx.param(
+  str_c(ddir, "/main/merged_output.gdx"),
+  "iamc_gdx"
+) %>%
+  filter(Y5 %in% 2020:2050) %>%
+  rename(
+    Scenario = Sc,
+    Region   = Sr,
+    Variable = Sv,
+    Year     = Y5,
+    Value    = iamc_gdx
+  ) %>%
+  mutate(
+    Year     = as.numeric(as.character(Year)),
+    Region   = as.character(Region),
+    Scenario = as.character(Scenario)
+  ) %>%
+  pivot_wider(
+    names_from  = Year,
+    values_from = Value,
+    values_fill = 0
+  ) %>%
+  pivot_longer(
+    cols      = -c(Scenario, Variable, Region),
+    names_to  = "Year",
+    values_to = "Value"
+  ) %>%
+  pivot_wider(
+    names_from  = Variable,
+    values_from = Value,
+    values_fill = 0
+  ) %>%
+  pivot_longer(
+    cols      = -c(Scenario, Region, Year),
+    names_to  = "Variable",
+    values_to = "Value"
+  ) %>%
+  filter(Value != "N/A", !is.na(Value)) %>%
+  mutate(
+    Year  = as.numeric(Year),
+    Value = as.numeric(Value),
+    TR    = "Regional"
+  )
+
+# 1) 対象変数
+target_vars <- c(
+  "Cap_Ele_Solar",
+  "Cap_Ele_Win",
+  "Cap_Ele_Hyp",
+  "Cap_Ele_Sto_Bat",
+  "Cap_Hyd_Ele",
+  "Sec_Ene_Ele_Cur",
+  "Sec_Ene_Ele_Tra_Los",
+  "Sec_Ene_Hyd_Ele"
+)
+
+# 2) TR の表示順
+tr_levels_plot <- c("AIM-T", "PSM-6H", "Regional")
+
+# 3) プロット用の共通データ
+# df_all と df_regional は同じ粒度の系列データなので bind_rows で縦結合する
+df_base <- bind_rows(
+  df_all %>%
+    select(Scenario, Region, Year, Variable, Value, TR),
+  df_regional %>%
+    select(Scenario, Region, Year, Variable, Value, TR)) %>% 
+  filter(
+    Region %in% Region_list,
+    Scenario == "300C") 
+
+df_plot <- df_base %>%
+  filter(Variable %in% target_vars) %>%
+  mutate(
+    TR     = str_replace_all(str_trim(as.character(TR)), "–", "-"),
+    TR     = factor(TR, levels = tr_levels_plot),
+    Region = factor(as.character(Region), levels = Region_list)
+  )
+
+# 4) 背景色判定用データ
+# 背景色は AIM-T と PSM-6H の比較だけで作る
+bg_2050 <- df_plot %>%
+  filter(
+    Year == 2050,
+    TR %in% c("AIM-T", "PSM-6H")
+  ) %>%
+  select(Region, Variable, TR, Value) %>%
+  pivot_wider(names_from = TR, values_from = Value) %>%
+  mutate(
+    diff = `PSM-6H` - `AIM-T`,
+    bg   = case_when(
+      diff >  0 ~ "PSM_gt",
+      diff <  0 ~ "PSM_lt",
+      TRUE      ~ "equal"
+    ),
+    xmin = -Inf,
+    xmax = Inf,
+    ymin = -Inf,
+    ymax = Inf
+  )
+
+# 5) 31地域 facet 用の汎用プロット関数
+plot_tr_comparison_31facet <- function(var, ylab, title_txt, facet_ncol = 6) {
+  
+  d <- df_plot %>% filter(Variable == var)
+  if (nrow(d) == 0) return(NULL)
+  
+  bg_d <- bg_2050 %>% filter(Variable == var)
+  
+  ggplot(d) +
+    geom_rect(
+      data = bg_d,
+      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = bg),
+      inherit.aes = FALSE,
+      alpha = 0.15
+    ) +
+    geom_line(
+      aes(Year, Value, color = TR, group = TR),
+      linewidth = 0.35
+    ) +
+    geom_point(
+      aes(Year, Value, color = TR, shape = TR, group = TR),
+      size = 2.0,
+      stroke = 0.6
+    ) +
+    scale_fill_manual(
+      values = c(
+        PSM_gt = "#F4A6A6",
+        PSM_lt = "#A6C8E5",
+        equal  = "grey90"
+      ),
+      guide = "none"
+    ) +
+    scale_color_manual(values = line_color, drop = FALSE) +
+    scale_shape_manual(values = shape, drop = FALSE) +
+    facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
+    labs(
+      y     = ylab,
+      title = title_txt
+    ) +
+    MyTheme +
+    theme(
+      legend.position   = "bottom",
+      legend.text       = element_text(size = 9),
+      legend.title      = element_blank(),
+      strip.text        = element_text(size = 8),
+      axis.text         = element_text(size = 7),
+      axis.title.x      = element_blank()
+    )
+}
+
+# 6) 出力仕様
+plot_specs <- tribble(
+  ~group,           ~var,                    ~ylab,                                      ~title,                                  ~fname,
+  "plot_capacity",  "Cap_Ele_Solar",         "Capacity (GW)",                            "Solar power capacity",                  "Cap_TR_comparison_Solar_31reg.png",
+  "plot_capacity",  "Cap_Ele_Win",           "Capacity (GW)",                            "Wind power capacity",                   "Cap_TR_comparison_Wind_31reg.png",
+  "plot_capacity",  "Cap_Ele_Hyp",           "Capacity (GW)",                            "Hydro power capacity",                   "Cap_TR_comparison_Hydro_31reg.png",
+  "plot_capacity",  "Cap_Ele_Sto_Bat",       "Capacity (GW)",                            "Battery capacity",                      "Cap_TR_comparison_Battery_31reg.png",
+  "plot_capacity",  "Cap_Hyd_Ele",           "Capacity (GW)",                            "Electrolyzer capacity",                 "Cap_TR_comparison_Electrolyzer_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Ele_Cur",       "Curtailment (EJ/yr)",                      "Electricity curtailment",               "Eleuse_TR_comparison_Curtailment_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Ele_Tra_Los",   "Transmission Loss (EJ/yr)",                "Transmission Loss",                     "Eleuse_TR_comparison_TransmissionLoss_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Hyd_Ele",       "Electricity used for electrolysis (EJ/yr)","Electricity for hydrogen production",   "Eleuse_TR_comparison_Electrolysis_31reg.png"
+)
+
+# 7) 保存設定
+save_width_mm  <- 200
+save_height_mm <- 180
+facet_ncol     <- 6
+
+base_dir <- file.path("output", "Asia")
+
+for (i in seq_len(nrow(plot_specs))) {
+  
+  out_dir <- file.path(base_dir, plot_specs$group[i])
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  
+  p <- plot_tr_comparison_31facet(
+    var        = plot_specs$var[i],
+    ylab       = plot_specs$ylab[i],
+    title_txt  = plot_specs$title[i],
+    facet_ncol = facet_ncol
+  )
+  
+  if (!is.null(p)) {
+    ggsave(
+      filename = file.path(out_dir, plot_specs$fname[i]),
+      plot     = p,
+      width    = save_width_mm,
+      height   = save_height_mm,
+      units    = "mm",
+      dpi      = 300,
+      bg       = "white"
+    )
+  }
+}
+
+
+#発電構成
+plt <- set_plot(secele)
+
+df_secele <- df_base %>%
+  filter(Scenario %in% c('Baseline','300C')) %>%
+  filter(Variable %in% secele$Variable, Year == 2050) %>%
+  mutate(
+    Variable = factor(Variable, levels = rev(secele$Variable)))
+
+g_secele <- df_secele %>%
+  ggplot() +
+  geom_bar(aes(x=TR,y=Value,fill=Variable),stat='identity') +
+  scale_fill_manual(values=plt$Color,labels=plt$Legend,name='') +
+  facet_wrap(vars(Region),nrow=2,scales="free_y") +
+  guides(fill=guide_legend(reverse=FALSE)) +
+  labs(y=expression(paste('Power generation (EJ ',{yr^-1},')'))) +
+  MyTheme +
+  theme(
+    title = element_text(size = 10),
+    legend.position = "bottom", 
+    legend.text = element_text(size = 10),
+    legend.title = element_blank())
+
+ggsave(filename='output/Asia/plot_power/world_secele.png',
+       plot=g_secele,width=220,height=200,units='mm',dpi=300,bg='white')
+
+# Europe 特定項目の全地域統合版-------------------------------------------------------------------------
+
+
+Region_list <- c("XE15", "XE10", "XE3", "TUR", "XEWI", "XEEI", "XENI", "RUS", "XCS")
+
+aimpsy   <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+scenario <- "global2050"
+ddir     <- file.path(aimpsy, scenario, "Europe", "2603062217")
+
+# 0) Regional データの読み込みと整形
+df_regional <- rgdx.param(
+  str_c(ddir, "/main/merged_output.gdx"),
+  "iamc_gdx"
+) %>%
+  filter(Y5 %in% 2020:2050) %>%
+  rename(
+    Scenario = Sc,
+    Region   = Sr,
+    Variable = Sv,
+    Year     = Y5,
+    Value    = iamc_gdx
+  ) %>%
+  mutate(
+    Year     = as.numeric(as.character(Year)),
+    Region   = as.character(Region),
+    Scenario = as.character(Scenario)
+  ) %>%
+  pivot_wider(
+    names_from  = Year,
+    values_from = Value,
+    values_fill = 0
+  ) %>%
+  pivot_longer(
+    cols      = -c(Scenario, Variable, Region),
+    names_to  = "Year",
+    values_to = "Value"
+  ) %>%
+  pivot_wider(
+    names_from  = Variable,
+    values_from = Value,
+    values_fill = 0
+  ) %>%
+  pivot_longer(
+    cols      = -c(Scenario, Region, Year),
+    names_to  = "Variable",
+    values_to = "Value"
+  ) %>%
+  filter(Value != "N/A", !is.na(Value)) %>%
+  mutate(
+    Year  = as.numeric(Year),
+    Value = as.numeric(Value),
+    TR    = "Regional"
+  )
+
+# 1) 対象変数
+target_vars <- c(
+  "Cap_Ele_Solar",
+  "Cap_Ele_Win",
+  "Cap_Ele_Hyp",
+  "Cap_Ele_Sto_Bat",
+  "Cap_Hyd_Ele",
+  "Sec_Ene_Ele_Cur",
+  "Sec_Ene_Ele_Tra_Los",
+  "Sec_Ene_Hyd_Ele"
+)
+
+# 2) TR の表示順
+tr_levels_plot <- c("AIM-T", "PSM-6H", "Regional")
+
+# 3) プロット用の共通データ
+# df_all と df_regional は同じ粒度の系列データなので bind_rows で縦結合する
+df_base <- bind_rows(
+  df_all %>%
+    select(Scenario, Region, Year, Variable, Value, TR),
+  df_regional %>%
+    select(Scenario, Region, Year, Variable, Value, TR)) %>% 
+  filter(
+    Region %in% Region_list,
+    Scenario == "300C") 
+
+df_plot <- df_base %>%
+  filter(Variable %in% target_vars) %>%
+  mutate(
+    TR     = str_replace_all(str_trim(as.character(TR)), "–", "-"),
+    TR     = factor(TR, levels = tr_levels_plot),
+    Region = factor(as.character(Region), levels = Region_list)
+  )
+
+# 4) 背景色判定用データ
+# 背景色は AIM-T と PSM-6H の比較だけで作る
+bg_2050 <- df_plot %>%
+  filter(
+    Year == 2050,
+    TR %in% c("AIM-T", "PSM-6H")
+  ) %>%
+  select(Region, Variable, TR, Value) %>%
+  pivot_wider(names_from = TR, values_from = Value) %>%
+  mutate(
+    diff = `PSM-6H` - `AIM-T`,
+    bg   = case_when(
+      diff >  0 ~ "PSM_gt",
+      diff <  0 ~ "PSM_lt",
+      TRUE      ~ "equal"
+    ),
+    xmin = -Inf,
+    xmax = Inf,
+    ymin = -Inf,
+    ymax = Inf
+  )
+
+# 5) 31地域 facet 用の汎用プロット関数
+plot_tr_comparison_31facet <- function(var, ylab, title_txt, facet_ncol = 6) {
+  
+  d <- df_plot %>% filter(Variable == var)
+  if (nrow(d) == 0) return(NULL)
+  
+  bg_d <- bg_2050 %>% filter(Variable == var)
+  
+  ggplot(d) +
+    geom_rect(
+      data = bg_d,
+      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = bg),
+      inherit.aes = FALSE,
+      alpha = 0.15
+    ) +
+    geom_line(
+      aes(Year, Value, color = TR, group = TR),
+      linewidth = 0.35
+    ) +
+    geom_point(
+      aes(Year, Value, color = TR, shape = TR, group = TR),
+      size = 2.0,
+      stroke = 0.6
+    ) +
+    expand_limits(y = 0) +
+    scale_fill_manual(
+      values = c(
+        PSM_gt = "#F4A6A6",
+        PSM_lt = "#A6C8E5",
+        equal  = "grey90"
+      ),
+      guide = "none"
+    ) +
+    scale_color_manual(values = line_color, drop = FALSE) +
+    scale_shape_manual(values = shape, drop = FALSE) +
+    facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
+    labs(
+      y     = ylab,
+      title = title_txt
+    ) +
+    MyTheme +
+    theme(
+      legend.position   = "bottom",
+      legend.text       = element_text(size = 9),
+      legend.title      = element_blank(),
+      strip.text        = element_text(size = 8),
+      axis.text         = element_text(size = 7),
+      axis.title.x      = element_blank()
+    )
+}
+
+# 6) 出力仕様
+plot_specs <- tribble(
+  ~group,           ~var,                    ~ylab,                                      ~title,                                  ~fname,
+  "plot_capacity",  "Cap_Ele_Solar",         "Capacity (GW)",                            "Solar power capacity",                  "Cap_TR_comparison_Solar_31reg.png",
+  "plot_capacity",  "Cap_Ele_Win",           "Capacity (GW)",                            "Wind power capacity",                   "Cap_TR_comparison_Wind_31reg.png",
+  "plot_capacity",  "Cap_Ele_Hyp",           "Capacity (GW)",                            "Hydro power capacity",                   "Cap_TR_comparison_Hydro_31reg.png",
+  "plot_capacity",  "Cap_Ele_Sto_Bat",       "Capacity (GW)",                            "Battery capacity",                      "Cap_TR_comparison_Battery_31reg.png",
+  "plot_capacity",  "Cap_Hyd_Ele",           "Capacity (GW)",                            "Electrolyzer capacity",                 "Cap_TR_comparison_Electrolyzer_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Ele_Cur",       "Curtailment (EJ/yr)",                      "Electricity curtailment",               "Eleuse_TR_comparison_Curtailment_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Ele_Tra_Los",   "Transmission Loss (EJ/yr)",                "Transmission Loss",                     "Eleuse_TR_comparison_TransmissionLoss_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Hyd_Ele",       "Electricity used for electrolysis (EJ/yr)","Electricity for hydrogen production",   "Eleuse_TR_comparison_Electrolysis_31reg.png"
+)
+
+# 7) 保存設定
+save_width_mm  <- 200
+save_height_mm <- 180
+facet_ncol     <- 6
+
+base_dir <- file.path("output", "Europe")
+
+for (i in seq_len(nrow(plot_specs))) {
+  
+  out_dir <- file.path(base_dir, plot_specs$group[i])
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  
+  p <- plot_tr_comparison_31facet(
+    var        = plot_specs$var[i],
+    ylab       = plot_specs$ylab[i],
+    title_txt  = plot_specs$title[i],
+    facet_ncol = facet_ncol
+  )
+  
+  if (!is.null(p)) {
+    ggsave(
+      filename = file.path(out_dir, plot_specs$fname[i]),
+      plot     = p,
+      width    = save_width_mm,
+      height   = save_height_mm,
+      units    = "mm",
+      dpi      = 300,
+      bg       = "white"
+    )
+  }
+}
+
+
+#発電構成
+plt <- set_plot(secele)
+
+df_secele <- df_base %>%
+  filter(Scenario %in% c('Baseline','300C')) %>%
+  filter(Variable %in% secele$Variable, Year == 2050) %>%
+  mutate(
+    Variable = factor(Variable, levels = rev(secele$Variable)))
+
+g_secele <- df_secele %>%
+  ggplot() +
+  geom_bar(aes(x=TR,y=Value,fill=Variable),stat='identity') +
+  scale_fill_manual(values=plt$Color,labels=plt$Legend,name='') +
+  facet_wrap(vars(Region),nrow=2,scales="free_y") +
+  guides(fill=guide_legend(reverse=FALSE)) +
+  labs(y=expression(paste('Power generation (EJ ',{yr^-1},')'))) +
+  MyTheme +
+  theme(
+    title = element_text(size = 10),
+    legend.position = "bottom", 
+    legend.text = element_text(size = 10),
+    legend.title = element_blank())
+
+ggsave(filename='output/Europe/plot_power/world_secele.png',
+       plot=g_secele,width=200,height=200,units='mm',dpi=300,bg='white')
+
+# NorthAmerica 特定項目の全地域統合版-------------------------------------------------------------------------
+
+Region_list <- c("USA", "CAN", "MEX")
+
+aimpsy   <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+scenario <- "global2050"
+ddir     <- file.path(aimpsy, scenario, "NorthAmerica", "2603070234")
+
+# 0) Regional データの読み込みと整形
+df_regional <- rgdx.param(
+  str_c(ddir, "/main/merged_output.gdx"),
+  "iamc_gdx"
+) %>%
+  filter(Y5 %in% 2020:2050) %>%
+  rename(
+    Scenario = Sc,
+    Region   = Sr,
+    Variable = Sv,
+    Year     = Y5,
+    Value    = iamc_gdx
+  ) %>%
+  mutate(
+    Year     = as.numeric(as.character(Year)),
+    Region   = as.character(Region),
+    Scenario = as.character(Scenario)
+  ) %>%
+  pivot_wider(
+    names_from  = Year,
+    values_from = Value,
+    values_fill = 0
+  ) %>%
+  pivot_longer(
+    cols      = -c(Scenario, Variable, Region),
+    names_to  = "Year",
+    values_to = "Value"
+  ) %>%
+  pivot_wider(
+    names_from  = Variable,
+    values_from = Value,
+    values_fill = 0
+  ) %>%
+  pivot_longer(
+    cols      = -c(Scenario, Region, Year),
+    names_to  = "Variable",
+    values_to = "Value"
+  ) %>%
+  filter(Value != "N/A", !is.na(Value)) %>%
+  mutate(
+    Year  = as.numeric(Year),
+    Value = as.numeric(Value),
+    TR    = "Regional"
+  )
+
+# 1) 対象変数
+target_vars <- c(
+  "Cap_Ele_Solar",
+  "Cap_Ele_Win",
+  "Cap_Ele_Hyp",
+  "Cap_Ele_Sto_Bat",
+  "Cap_Hyd_Ele",
+  "Sec_Ene_Ele_Cur",
+  "Sec_Ene_Ele_Tra_Los",
+  "Sec_Ene_Hyd_Ele"
+)
+
+# 2) TR の表示順
+tr_levels_plot <- c("AIM-T", "PSM-6H", "Regional")
+
+# 3) プロット用の共通データ
+# df_all と df_regional は同じ粒度の系列データなので bind_rows で縦結合する
+df_base <- bind_rows(
+  df_all %>%
+    select(Scenario, Region, Year, Variable, Value, TR),
+  df_regional %>%
+    select(Scenario, Region, Year, Variable, Value, TR)) %>% 
+  filter(
+    Region %in% Region_list,
+    Scenario == "300C") 
+
+df_plot <- df_base %>%
+  filter(Variable %in% target_vars) %>%
+  mutate(
+    TR     = str_replace_all(str_trim(as.character(TR)), "–", "-"),
+    TR     = factor(TR, levels = tr_levels_plot),
+    Region = factor(as.character(Region), levels = Region_list)
+  )
+
+# 4) 背景色判定用データ
+# 背景色は AIM-T と PSM-6H の比較だけで作る
+bg_2050 <- df_plot %>%
+  filter(
+    Year == 2050,
+    TR %in% c("AIM-T", "PSM-6H")
+  ) %>%
+  select(Region, Variable, TR, Value) %>%
+  pivot_wider(names_from = TR, values_from = Value) %>%
+  mutate(
+    diff = `PSM-6H` - `AIM-T`,
+    bg   = case_when(
+      diff >  0 ~ "PSM_gt",
+      diff <  0 ~ "PSM_lt",
+      TRUE      ~ "equal"
+    ),
+    xmin = -Inf,
+    xmax = Inf,
+    ymin = -Inf,
+    ymax = Inf
+  )
+
+# 5) 31地域 facet 用の汎用プロット関数
+plot_tr_comparison_31facet <- function(var, ylab, title_txt, facet_ncol = 6) {
+  
+  d <- df_plot %>% filter(Variable == var)
+  if (nrow(d) == 0) return(NULL)
+  
+  bg_d <- bg_2050 %>% filter(Variable == var)
+  
+  ggplot(d) +
+    geom_rect(
+      data = bg_d,
+      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax, fill = bg),
+      inherit.aes = FALSE,
+      alpha = 0.15
+    ) +
+    geom_line(
+      aes(Year, Value, color = TR, group = TR),
+      linewidth = 0.35
+    ) +
+    geom_point(
+      aes(Year, Value, color = TR, shape = TR, group = TR),
+      size = 2.0,
+      stroke = 0.6
+    ) +
+    expand_limits(y = 0) +
+    scale_fill_manual(
+      values = c(
+        PSM_gt = "#F4A6A6",
+        PSM_lt = "#A6C8E5",
+        equal  = "grey90"
+      ),
+      guide = "none"
+    ) +
+    scale_color_manual(values = line_color, drop = FALSE) +
+    scale_shape_manual(values = shape, drop = FALSE) +
+    facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
+    labs(
+      y     = ylab,
+      title = title_txt
+    ) +
+    MyTheme +
+    theme(
+      legend.position   = "bottom",
+      legend.text       = element_text(size = 9),
+      legend.title      = element_blank(),
+      strip.text        = element_text(size = 8),
+      axis.text         = element_text(size = 7),
+      axis.title.x      = element_blank()
+    )
+}
+
+# 6) 出力仕様
+plot_specs <- tribble(
+  ~group,           ~var,                    ~ylab,                                      ~title,                                  ~fname,
+  "plot_capacity",  "Cap_Ele_Solar",         "Capacity (GW)",                            "Solar power capacity",                  "Cap_TR_comparison_Solar_31reg.png",
+  "plot_capacity",  "Cap_Ele_Win",           "Capacity (GW)",                            "Wind power capacity",                   "Cap_TR_comparison_Wind_31reg.png",
+  "plot_capacity",  "Cap_Ele_Hyp",           "Capacity (GW)",                            "Hydro power capacity",                   "Cap_TR_comparison_Hydro_31reg.png",
+  "plot_capacity",  "Cap_Ele_Sto_Bat",       "Capacity (GW)",                            "Battery capacity",                      "Cap_TR_comparison_Battery_31reg.png",
+  "plot_capacity",  "Cap_Hyd_Ele",           "Capacity (GW)",                            "Electrolyzer capacity",                 "Cap_TR_comparison_Electrolyzer_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Ele_Cur",       "Curtailment (EJ/yr)",                      "Electricity curtailment",               "Eleuse_TR_comparison_Curtailment_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Ele_Tra_Los",   "Transmission Loss (EJ/yr)",                "Transmission Loss",                     "Eleuse_TR_comparison_TransmissionLoss_31reg.png",
+  "plot_eleuse",    "Sec_Ene_Hyd_Ele",       "Electricity used for electrolysis (EJ/yr)","Electricity for hydrogen production",   "Eleuse_TR_comparison_Electrolysis_31reg.png"
+)
+
+# 7) 保存設定
+save_width_mm  <- 120
+save_height_mm <- 120
+facet_ncol     <- 6
+
+base_dir <- file.path("output", "NorthAmerica")
+
+for (i in seq_len(nrow(plot_specs))) {
+  
+  out_dir <- file.path(base_dir, plot_specs$group[i])
+  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  
+  p <- plot_tr_comparison_31facet(
+    var        = plot_specs$var[i],
+    ylab       = plot_specs$ylab[i],
+    title_txt  = plot_specs$title[i],
+    facet_ncol = facet_ncol
+  )
+  
+  if (!is.null(p)) {
+    ggsave(
+      filename = file.path(out_dir, plot_specs$fname[i]),
+      plot     = p,
+      width    = save_width_mm,
+      height   = save_height_mm,
+      units    = "mm",
+      dpi      = 300,
+      bg       = "white"
+    )
+  }
+}
+
+#発電構成
+plt <- set_plot(secele)
+
+df_secele <- df_base %>%
+  filter(Scenario %in% c('Baseline','300C')) %>%
+  filter(Variable %in% secele$Variable, Year == 2050) %>%
+  mutate(
+    Variable = factor(Variable, levels = rev(secele$Variable)))
+
+g_secele <- df_secele %>%
+  ggplot() +
+  geom_bar(aes(x=TR,y=Value,fill=Variable),stat='identity') +
+  scale_fill_manual(values=plt$Color,labels=plt$Legend,name='') +
+  facet_wrap(vars(Region),nrow=1,scales="free_y") +
+  guides(fill=guide_legend(reverse=FALSE)) +
+  labs(y=expression(paste('Power generation (EJ ',{yr^-1},')'))) +
+  MyTheme +
+  theme(
+    title = element_text(size = 10),
+    legend.position = "bottom", 
+    legend.text = element_text(size = 10),
+    legend.title = element_blank())
+
+ggsave(filename='output/NorthAmerica/plot_power/world_secele.png',
+       plot=g_secele,width=150,height=150,units='mm',dpi=300,bg='white')
