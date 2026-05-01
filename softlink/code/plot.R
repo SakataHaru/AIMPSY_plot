@@ -6,13 +6,20 @@ library(ggplot2)
 library(gdxrrw)
 library(tibble)
 
-gams_sys_dir <- "C:/GAMS/win64/26.1"
-if (dir.exists(gams_sys_dir)) {
-  igdx(gams_sys_dir)
+for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
+  if (dir.exists(gams_sys_dir)) {
+    igdx(gams_sys_dir)
+    break
+  }
 }
 
 case_name <- "Global softlink 12-day"
-main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink/global/2604281658/main"
+
+aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
+scenario <- 'global_softlink'
+region <- 'global'
+date <- '2604281658'
+main_dir <- paste0(aimpsy, "/", scenario, "/", region, "/", date, "/main")
 
 region_list <- c(
   "JPN", "CHN", "IND", "IDN", "KOR", "THA", "MYS", "VNM",
@@ -22,11 +29,16 @@ region_list <- c(
   "XAF", "XNF"
 )
 
-target_scenario <- "300C"
+target_scenarios <- c("300C", "700C")
 target_years <- seq(2020, 2050, by = 5)
-base_dir <- file.path("output", "global_softlink", "global_12day")
+softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
+  "."
+} else {
+  "softlink"
+}
+base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_12day")
 
-line_color <- "#1f78b4"
+scenario_color <- c("300C" = "#1f78b4", "700C" = "#e31a1c")
 point_shape <- 16
 
 MyTheme <- theme_bw() +
@@ -107,10 +119,11 @@ read_iamc_gdx <- function(main_dir) {
 df_base <- read_iamc_gdx(main_dir) %>%
   filter(
     Region %in% region_list,
-    Scenario == target_scenario,
+    Scenario %in% target_scenarios,
     Year %in% target_years
   ) %>%
   mutate(
+    Scenario = factor(Scenario, levels = target_scenarios),
     Region = factor(Region, levels = region_list),
     Case = case_name
   )
@@ -135,18 +148,19 @@ plot_global_softlink_facet <- function(var, ylab, title_txt, facet_ncol = 6) {
   d <- df_plot %>% filter(Variable == var)
   if (nrow(d) == 0) return(NULL)
 
-  ggplot(d, aes(Year, Value, group = Region)) +
-    geom_line(color = line_color, linewidth = 0.35) +
-    geom_point(color = line_color, shape = point_shape, size = 1.8, stroke = 0.5) +
+  ggplot(d, aes(Year, Value, color = Scenario, group = interaction(Region, Scenario))) +
+    geom_line(linewidth = 0.35) +
+    geom_point(shape = point_shape, size = 1.8, stroke = 0.5) +
     expand_limits(y = 0) +
+    scale_color_manual(values = scenario_color, drop = FALSE) +
     facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
     labs(
       y = ylab,
-      title = paste0(title_txt, " (", target_scenario, ", ", case_name, ")")
+      title = paste0(title_txt, " (", paste(target_scenarios, collapse = " / "), ", ", case_name, ")")
     ) +
     MyTheme +
     theme(
-      legend.position = "none",
+      legend.position = "bottom",
       strip.text = element_text(size = 8),
       axis.text = element_text(size = 7),
       axis.title.x = element_blank()
@@ -208,10 +222,11 @@ g_secele <- df_secele %>%
   ggplot() +
   geom_bar(aes(x = Region, y = Value, fill = Variable), stat = "identity") +
   scale_fill_manual(values = plt$Color, labels = plt$Legend, name = "") +
+  facet_wrap(~Scenario, ncol = 1) +
   guides(fill = guide_legend(reverse = FALSE)) +
   labs(
     y = expression(paste("Power generation (EJ ", {yr^-1}, ")")),
-    title = paste0("Power generation in 2050 (", target_scenario, ", ", case_name, ")")
+    title = paste0("Power generation in 2050 (", paste(target_scenarios, collapse = " / "), ", ", case_name, ")")
   ) +
   MyTheme +
   theme(
@@ -225,10 +240,10 @@ out_dir <- file.path(base_dir, "plot_power")
 if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
 ggsave(
-  filename = file.path(out_dir, "power_generation_2050_300C_global_softlink_31reg.png"),
+  filename = file.path(out_dir, "power_generation_2050_300C_700C_global_softlink_31reg.png"),
   plot = g_secele,
   width = 260,
-  height = 160,
+  height = 260,
   units = "mm",
   dpi = 300,
   bg = "white"
@@ -243,16 +258,17 @@ plot_world_total <- function(var, ylab, title_txt) {
   d <- df_world_total %>% filter(Variable == var)
   if (nrow(d) == 0) return(NULL)
 
-  ggplot(d, aes(Year, Value)) +
-    geom_line(color = line_color, linewidth = 0.5) +
-    geom_point(color = line_color, shape = point_shape, size = 2.0, stroke = 0.5) +
+  ggplot(d, aes(Year, Value, color = Scenario, group = Scenario)) +
+    geom_line(linewidth = 0.5) +
+    geom_point(shape = point_shape, size = 2.0, stroke = 0.5) +
     expand_limits(y = 0) +
+    scale_color_manual(values = scenario_color, drop = FALSE) +
     labs(
       y = ylab,
-      title = paste0(title_txt, " - world total (", target_scenario, ", ", case_name, ")")
+      title = paste0(title_txt, " - world total (", paste(target_scenarios, collapse = " / "), ", ", case_name, ")")
     ) +
     MyTheme +
-    theme(legend.position = "none")
+    theme(legend.position = "bottom")
 }
 
 out_dir <- file.path(base_dir, "plot_world_total")
