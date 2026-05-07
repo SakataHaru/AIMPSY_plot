@@ -10,6 +10,8 @@ library(gdxrrw)
 library(rnaturalearth)
 library(rnaturalearthdata)
 
+sf_use_s2(FALSE)
+
 #for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 #  if (dir.exists(gams_sys_dir)) {
 #    igdx(gams_sys_dir)
@@ -32,6 +34,8 @@ softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = F
 } else {
   "softlink"
 }
+data_dir <- file.path(softlink_dir, "data")
+nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 out_dir <- file.path(softlink_dir, "output", "global_softlink", "global_12day")
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
@@ -47,6 +51,136 @@ value_specs <- tribble(
 )
 
 arrow_threshold <- 10
+
+build_region_boundaries <- function() {
+  world <- ne_countries(scale = "medium", returnclass = "sf") %>%
+    st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>%
+    st_make_valid() %>%
+    mutate(iso3 = if_else(iso_a3 == "-99", adm0_a3, iso_a3))
+
+  region_map <- tribble(
+    ~iso3, ~region,
+
+    # Individual Asian regions
+    "JPN", "JPN",
+    "CHN", "CHN",
+    "IND", "IND",
+    "IDN", "IDN",
+    "KOR", "KOR",
+    "THA", "THA",
+    "MYS", "MYS",
+    "VNM", "VNM",
+
+    # Southeast Asia
+    "BRN", "XSE", "KHM", "XSE", "LAO", "XSE",
+    "MMR", "XSE", "PHL", "XSE", "SGP", "XSE",
+    "TLS", "XSE",
+
+    # South Asia
+    "AFG", "XSA", "BGD", "XSA", "BTN", "XSA",
+    "LKA", "XSA", "MDV", "XSA", "NPL", "XSA",
+    "PAK", "XSA",
+
+    # East Asia
+    "MNG", "XEA", "PRK", "XEA", "TWN", "XEA",
+
+    # Central Asia
+    "KAZ", "XCS", "KGZ", "XCS", "TJK", "XCS",
+    "TKM", "XCS", "UZB", "XCS",
+
+    # Middle East
+    "ARE", "XME", "BHR", "XME", "IRN", "XME",
+    "IRQ", "XME", "ISR", "XME", "JOR", "XME",
+    "KWT", "XME", "LBN", "XME", "OMN", "XME",
+    "QAT", "XME", "SAU", "XME", "SYR", "XME",
+    "YEM", "XME",
+
+    # Oceania
+    "AUS", "AUS",
+    "NZL", "XOC", "PNG", "XOC", "FJI", "XOC",
+    "SLB", "XOC", "VUT", "XOC", "WSM", "XOC",
+
+    # North America
+    "CAN", "CAN",
+    "USA", "USA",
+    "MEX", "MEX",
+
+    # Latin America
+    "BRA", "BRA",
+    "ARG", "XLM", "BOL", "XLM", "CHL", "XLM",
+    "COL", "XLM", "CRI", "XLM", "CUB", "XLM",
+    "DOM", "XLM", "ECU", "XLM", "GTM", "XLM",
+    "HND", "XLM", "HTI", "XLM", "JAM", "XLM",
+    "NIC", "XLM", "PAN", "XLM", "PER", "XLM",
+    "PRY", "XLM", "SLV", "XLM", "URY", "XLM",
+    "VEN", "XLM", "GUY", "XLM", "SUR", "XLM",
+    "TTO", "XLM", "BHS", "XLM", "BRB", "XLM",
+    "BLZ", "XLM",
+
+    # Europe
+    "TUR", "TUR",
+    "RUS", "RUS",
+
+    # EU15
+    "AUT", "XE15", "BEL", "XE15", "DNK", "XE15",
+    "FIN", "XE15", "FRA", "XE15", "DEU", "XE15",
+    "GRC", "XE15", "IRL", "XE15", "ITA", "XE15",
+    "LUX", "XE15", "NLD", "XE15", "PRT", "XE15",
+    "ESP", "XE15", "SWE", "XE15", "GBR", "XE15",
+
+    # EU10 / Central and Eastern EU
+    "BGR", "XE3", "CYP", "XE10", "CZE", "XE10",
+    "EST", "XE10", "HUN", "XE10", "LVA", "XE10",
+    "LTU", "XE10", "MLT", "XE10", "POL", "XE10",
+    "ROU", "XE3", "SVK", "XE10", "SVN", "XE10",
+
+    # Western Europe outside EU15
+    "CHE", "XEWI", "NOR", "XEWI", "ISL", "XEWI",
+
+    # Eastern Europe / Balkans / Caucasus
+    "ALB", "XEEI", "BIH", "XEEI", "HRV", "XEEI",
+    "MNE", "XEEI", "MKD", "XEEI", "SRB", "XEEI",
+    "UKR", "XEEI", "BLR", "XEEI", "MDA", "XEEI",
+    "ARM", "XEEI", "AZE", "XEEI", "GEO", "XEEI",
+
+    # North Africa
+    "DZA", "XENI", "EGY", "XENI", "LBY", "XENI",
+    "MAR", "XENI", "TUN", "XENI", "ESH", "XENI",
+
+    # South Africa
+    "ZAF", "ZAF",
+
+    # Africa
+    "AGO", "XAF", "BEN", "XAF", "BWA", "XAF",
+    "BFA", "XAF", "BDI", "XAF", "CMR", "XAF",
+    "CAF", "XAF", "TCD", "XAF", "COD", "XAF",
+    "COG", "XAF", "CIV", "XAF", "DJI", "XAF",
+    "ERI", "XAF", "ETH", "XAF", "GAB", "XAF",
+    "GHA", "XAF", "GIN", "XAF", "GNB", "XAF",
+    "GNQ", "XAF", "KEN", "XAF", "LBR", "XAF",
+    "LSO", "XAF", "MDG", "XAF", "MWI", "XAF",
+    "MLI", "XAF", "MRT", "XAF", "MOZ", "XAF",
+    "NAM", "XAF", "NER", "XAF", "NGA", "XAF",
+    "RWA", "XAF", "SEN", "XAF", "SLE", "XAF",
+    "SOM", "XAF", "SSD", "XAF", "SDN", "XAF",
+    "SWZ", "XAF", "TZA", "XAF", "TGO", "XAF",
+    "UGA", "XAF", "ZMB", "XAF", "ZWE", "XAF",
+
+    # No fuel / unclassified
+    "GRL", "XNF"
+  )
+
+  world %>%
+    left_join(region_map, by = "iso3") %>%
+    mutate(region = if_else(is.na(region), "XNF", region)) %>%
+    st_set_crs(NA) %>%
+    group_by(region) %>%
+    summarise(geometry = st_union(geometry), .groups = "drop") %>%
+    st_make_valid() %>%
+    st_set_crs(4326)
+}
+
+region_boundaries <- build_region_boundaries()
 
 node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson"
 if (!file.exists(node_path)) {
@@ -137,9 +271,6 @@ plot_transmission <- function(edges_sf, scenario_name, title_label, palette, val
     return(NULL)
   }
 
-  world <- ne_countries(scale = "medium", returnclass = "sf")
-  if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
-
   vmax <- max(edges_sf$Value, na.rm = TRUE)
   brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
   brks <- brks[brks <= vmax]
@@ -158,7 +289,7 @@ plot_transmission <- function(edges_sf, scenario_name, title_label, palette, val
   }
 
   p <- ggplot() +
-    geom_sf(data = world, fill = NA, color = "grey65", linewidth = 0.25) +
+    geom_sf(data = region_boundaries, fill = NA, color = "grey45", linewidth = 0.35) +
     scale_linewidth_continuous(
       range = linewidth_range,
       breaks = log10(1 + brks),
@@ -226,9 +357,6 @@ plot_combined_flow <- function(edges_sf, scenario_name, title_label, palette) {
     return(NULL)
   }
 
-  world <- ne_countries(scale = "medium", returnclass = "sf")
-  if (is.na(st_crs(world))) world <- st_set_crs(world, 4326)
-
   vmax <- max(edges_sf$Value, na.rm = TRUE)
   brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
   brks <- brks[brks <= vmax]
@@ -241,7 +369,7 @@ plot_combined_flow <- function(edges_sf, scenario_name, title_label, palette) {
   edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
 
   ggplot() +
-    geom_sf(data = world, fill = NA, color = "grey65", linewidth = 0.25) +
+    geom_sf(data = region_boundaries, fill = NA, color = "grey45", linewidth = 0.35) +
     geom_segment(
       data = edges_line_df,
       aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
@@ -271,7 +399,7 @@ plot_combined_flow <- function(edges_sf, scenario_name, title_label, palette) {
     coord_sf(ylim = c(-60, 75), expand = FALSE) +
     theme_void() +
     theme(
-      legend.position = c(0.08, 0.32),
+      legend.position = c(0.13, 0.32),
       legend.direction = "vertical",
       legend.background = element_rect(fill = "white", color = "grey85"),
       legend.key.width = unit(8, "mm"),
@@ -388,3 +516,181 @@ walk(seq_len(nrow(link_types)), function(i) {
     )
   }
 })
+
+# NH3 trade flow plots --------------------------------------------------------
+
+nh3_plot_threshold <- 1
+nh3_dir <- file.path(out_dir, "plot_trade_nh3")
+
+if (!file.exists(nh3_node_csv)) {
+  stop(
+    "Missing NH3 node coordinate CSV: ",
+    nh3_node_csv,
+    ". Run code/worldmap_plot.R first."
+  )
+}
+
+nh3_nodes_tbl <- read.csv(nh3_node_csv, stringsAsFactors = FALSE) %>%
+  transmute(N_PSY, lon = as.numeric(lon), lat = as.numeric(lat))
+
+dir.create(nh3_dir, recursive = TRUE, showWarnings = FALSE)
+
+read_nh3_trade_value <- function(scenario_name, value_spec) {
+  gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(gdx_path)) {
+    stop("Missing GDX file: ", gdx_path)
+  }
+
+  value_symbol <- value_spec$Symbol
+  direction <- value_spec$Direction
+
+  df_raw <- rgdx.param(gdx_path, value_symbol) %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$"))
+
+  df_link <- df_raw %>%
+    group_by(L) %>%
+    summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    filter(Value > nh3_plot_threshold)
+
+  if (nrow(df_link) == 0) {
+    return(tibble(
+      L = character(),
+      Value = numeric(),
+      Scenario = character(),
+      Symbol = character(),
+      N0 = character(),
+      N1 = character()
+    ))
+  }
+
+  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3_R31-([A-Z0-9]+)-NH3$")
+
+  df_link %>%
+    mutate(
+      Scenario = scenario_name,
+      Symbol = value_symbol,
+      N0 = link_nodes[, 2],
+      N1 = link_nodes[, 3]
+    ) %>%
+    mutate(
+      N0_plot = if (direction == "backward") N1 else N0,
+      N1_plot = if (direction == "backward") N0 else N1,
+      N0 = N0_plot,
+      N1 = N1_plot
+    ) %>%
+    select(-N0_plot, -N1_plot)
+}
+
+make_nh3_trade_edges_sf <- function(df_link) {
+  missing_nodes <- setdiff(unique(c(df_link$N0, df_link$N1)), nh3_nodes_tbl$N_PSY)
+  if (length(missing_nodes) > 0) {
+    stop("Missing NH3 node coordinates: ", paste(missing_nodes, collapse = ", "))
+  }
+
+  edges <- df_link %>%
+    inner_join(nh3_nodes_tbl, by = c("N0" = "N_PSY")) %>%
+    rename(x0 = lon, y0 = lat) %>%
+    inner_join(nh3_nodes_tbl, by = c("N1" = "N_PSY")) %>%
+    rename(x1 = lon, y1 = lat) %>%
+    filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1)) %>%
+    filter(Value > nh3_plot_threshold)
+
+  if (nrow(edges) == 0) {
+    return(st_sf(edges, geometry = st_sfc(crs = 4326)))
+  }
+
+  lines_sfc <- pmap(
+    edges[, c("x0", "y0", "x1", "y1")],
+    ~ st_linestring(matrix(c(..1, ..2, ..3, ..4), ncol = 2, byrow = TRUE))
+  )
+
+  st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+}
+
+nh3_value_specs <- value_specs %>%
+  filter(Symbol %in% c("vff_l", "vfb_l"))
+
+walk(seq_len(nrow(nh3_value_specs)), function(j) {
+  value_spec <- nh3_value_specs[j, ]
+  plot_dir <- file.path(nh3_dir, value_spec$Symbol)
+  dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+
+  for (scenario_name in scenarios) {
+    edges_sf <- read_nh3_trade_value(
+      scenario_name = scenario_name,
+      value_spec = value_spec
+    ) %>%
+      make_nh3_trade_edges_sf()
+
+    p <- plot_transmission(
+      edges_sf = edges_sf,
+      scenario_name = scenario_name,
+      title_label = "NH3 trade",
+      palette = "magma",
+      value_spec = value_spec
+    )
+    if (is.null(p)) next
+
+    ggsave(
+      filename = file.path(
+        plot_dir,
+        paste0(
+          "global_",
+          scenario_name,
+          "_",
+          value_spec$FileTag,
+          "_NH3_trade_",
+          plot_year,
+          ".png"
+        )
+      ),
+      plot = p,
+      width = 300,
+      height = 130,
+      units = "mm",
+      dpi = 300,
+      bg = "white"
+    )
+  }
+})
+
+nh3_combined_dir <- file.path(nh3_dir, "vff_l_vfb_l_combined")
+dir.create(nh3_combined_dir, recursive = TRUE, showWarnings = FALSE)
+
+for (scenario_name in scenarios) {
+  edges_combined_sf <- map_dfr(seq_len(nrow(nh3_value_specs)), function(j) {
+    read_nh3_trade_value(
+      scenario_name = scenario_name,
+      value_spec = nh3_value_specs[j, ]
+    )
+  }) %>%
+    make_nh3_trade_edges_sf()
+
+  p <- plot_combined_flow(
+    edges_sf = edges_combined_sf,
+    scenario_name = scenario_name,
+    title_label = "NH3 trade",
+    palette = "magma"
+  )
+  if (is.null(p)) next
+
+  ggsave(
+    filename = file.path(
+      nh3_combined_dir,
+      paste0(
+        "global_",
+        scenario_name,
+        "_vff_l_vfb_l_combined_NH3_trade_",
+        plot_year,
+        ".png"
+      )
+    ),
+    plot = p,
+    width = 300,
+    height = 130,
+    units = "mm",
+    dpi = 300,
+    bg = "white"
+  )
+}
