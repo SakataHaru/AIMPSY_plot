@@ -4,6 +4,7 @@ library(dplyr)
 library(stringr)
 library(tidyr)
 library(tibble)
+library(purrr)
 library(sf)
 library(ggplot2)
 library(gdxrrw)
@@ -25,7 +26,9 @@ region <- "global"
 date <- "2604281658"
 plot_year <- 2050
 scenarios <- c("300C", "700C")
-target_vars <- c("Sec_Ene_Hyd", "Sec_Ene_Hyd_Amm")
+target_vars <- c("Sec_Ene_Hyd", "Sec_Ene_Hyd_Amm", "Sec_Ene_Ele_Tra_Los_Tra")
+generation_var <- "Sec_Ene_Ele"
+read_vars <- unique(c(target_vars, generation_var))
 
 softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
   "."
@@ -36,6 +39,8 @@ softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = F
 main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
 gdx_path <- file.path(main_dir, "merged_output.gdx")
 out_dir <- file.path(softlink_dir, "output", "global_softlink", "global_12day", "plot_demand_map")
+data_dir <- file.path(softlink_dir, "data")
+nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 build_region_map <- function() {
@@ -146,7 +151,7 @@ read_demand_values <- function(gdx_path, region_map) {
     ) %>%
     filter(
       Scenario %in% scenarios,
-      Variable %in% target_vars,
+      Variable %in% read_vars,
       Year == plot_year,
       !is.na(Value)
     ) %>%
@@ -154,35 +159,103 @@ read_demand_values <- function(gdx_path, region_map) {
     summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
 }
 
-plot_demand_map <- function(map_data, scenario_name, variable_name) {
+plot_demand_map <- function(map_data, scenario_name, variable_name, loss_share_labels = NULL) {
   plot_data <- map_data %>%
     filter(Scenario == scenario_name, Variable == variable_name)
 
-  ggplot(plot_data) +
+  fill_colors <- if (variable_name == "Sec_Ene_Ele_Tra_Los_Tra") {
+    c(low = "#fff7bc", high = "#d95f0e")
+  } else if (variable_name == "Sec_Ene_Hyd_Amm") {
+    c(low = "#fbf7ff", high = "#54278f")
+  } else {
+    c(low = "#f7fbff", high = "#08306b")
+  }
+
+  variable_label <- case_when(
+    variable_name == "Sec_Ene_Ele_Tra_Los_Tra" ~ "transmission loss",
+    TRUE ~ "demand"
+  )
+
+  legend_title <- case_when(
+    variable_name == "Sec_Ene_Ele_Tra_Los_Tra" ~ "Transmission loss (EJ/yr)",
+    TRUE ~ "Demand (EJ/yr)"
+  )
+
+  p <- ggplot(plot_data) +
     geom_sf(aes(fill = Value), color = "grey35", linewidth = 0.3) +
     scale_fill_gradient(
-      low = "#f7fbff",
-      high = "#08306b",
+      low = fill_colors[["low"]],
+      high = fill_colors[["high"]],
       na.value = "grey92",
       labels = scales::label_number(accuracy = 0.01),
-      name = "Demand (EJ/yr)"
+      name = legend_title
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +
     theme(
-      legend.position = c(0.08, 0.32),
+      legend.position = c(0.08, 0.42),
       legend.direction = "vertical",
       legend.background = element_rect(fill = "white", color = "grey85"),
       legend.key.width = unit(8, "mm"),
-      legend.key.height = unit(28, "mm"),
+      legend.key.height = unit(18, "mm"),
       plot.title = element_text(hjust = 0.5, size = 12)
     ) +
-    labs(title = paste0(scenario_name, " ", variable_name, " demand by R31 region (", plot_year, ")"))
+    labs(title = paste0(scenario_name, " ", variable_name, " ", variable_label, " by R31 region (", plot_year, ")"))
+
+  if (variable_name == "Sec_Ene_Ele_Tra_Los_Tra" && !is.null(loss_share_labels)) {
+    label_data <- loss_share_labels %>%
+      filter(Scenario == scenario_name)
+
+    if (nrow(label_data) > 0) {
+      p <- p +
+        geom_label(
+          data = label_data,
+          aes(x = lon, y = lat, label = LossShareLabel),
+          inherit.aes = FALSE,
+          size = 2.4,
+          label.size = 0.12,
+          label.padding = unit(0.8, "mm"),
+          fill = "white",
+          alpha = 0.82,
+          color = "black"
+        )
+    }
+  }
+
+  p
 }
 
 region_map <- build_region_map()
 region_boundaries <- build_region_boundaries()
 demand_values <- read_demand_values(gdx_path, region_map)
+
+if (!file.exists(nh3_node_csv)) {
+  stop(
+    "Missing NH3 node coordinate CSV: ",
+    nh3_node_csv,
+    ". Run code/worldmap_plot.R first."
+  )
+}
+
+label_nodes <- read.csv(nh3_node_csv, stringsAsFactors = FALSE) %>%
+  transmute(
+    Region = N_PSY,
+    lon = as.numeric(lon),
+    lat = as.numeric(lat)
+  )
+
+loss_share_labels <- demand_values %>%
+  filter(Variable %in% c("Sec_Ene_Ele_Tra_Los_Tra", generation_var)) %>%
+  mutate(ValueType = if_else(Variable == "Sec_Ene_Ele_Tra_Los_Tra", "Loss", "Generation")) %>%
+  group_by(Scenario, Region, Year, ValueType) %>%
+  summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
+  pivot_wider(names_from = ValueType, values_from = Value, values_fill = 0) %>%
+  mutate(
+    LossShare = if_else(Generation > 0, 100 * Loss / Generation, NA_real_),
+    LossShareLabel = if_else(is.na(LossShare), NA_character_, paste0(sprintf("%.1f", LossShare), "%"))
+  ) %>%
+  filter(!is.na(LossShareLabel)) %>%
+  inner_join(label_nodes, by = "Region")
 
 missing_regions <- setdiff(demand_values$Region, region_boundaries$region)
 if (length(missing_regions) > 0) {
@@ -194,7 +267,7 @@ map_data <- region_boundaries %>%
 
 for (scenario_name in scenarios) {
   for (variable_name in target_vars) {
-    p <- plot_demand_map(map_data, scenario_name, variable_name)
+    p <- plot_demand_map(map_data, scenario_name, variable_name, loss_share_labels)
     print(p)
 
     ggsave(
@@ -205,6 +278,288 @@ for (scenario_name in scenarios) {
       plot = p,
       width = 300,
       height = 130,
+      units = "mm",
+      dpi = 300,
+      bg = "white"
+    )
+  }
+}
+
+# Demand maps with combined transport networks --------------------------------
+
+prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_primary")
+data_dir <- file.path(softlink_dir, "data")
+nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
+node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson"
+overlay_dir <- file.path(out_dir, "demand_transport_overlay")
+dir.create(overlay_dir, recursive = TRUE, showWarnings = FALSE)
+
+arrow_threshold <- 10
+
+flow_specs <- tribble(
+  ~Symbol, ~Direction,
+  "vff_l", "forward",
+  "vfb_l", "backward"
+)
+
+overlay_specs <- tribble(
+  ~Carrier, ~DemandVariable,      ~TitleLabel, ~LinkPattern,                         ~NodeSuffix,
+  "H2",     "Sec_Ene_Hyd",        "H2",        ".*-H2_.*-H2$",                       "-H2",
+  "NH3",    "Sec_Ene_Hyd_Amm",    "NH3",       "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$", NA_character_
+)
+
+read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
+  flow_gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(flow_gdx_path)) {
+    stop("Missing GDX file: ", flow_gdx_path)
+  }
+
+  value_symbol <- flow_spec$Symbol
+  direction <- flow_spec$Direction
+
+  df_raw <- rgdx.param(flow_gdx_path, value_symbol) %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, overlay_spec$LinkPattern))
+
+  df_link <- df_raw %>%
+    group_by(L) %>%
+    summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    filter(Value > 0)
+
+  if (nrow(df_link) == 0) {
+    return(tibble(
+      L = character(),
+      Value = numeric(),
+      Scenario = character(),
+      Symbol = character(),
+      N0 = character(),
+      N1 = character()
+    ))
+  }
+
+  if (overlay_spec$Carrier == "NH3") {
+    link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3_R31-([A-Z0-9]+)-NH3$")
+
+    df_link <- df_link %>%
+      mutate(
+        N0 = link_nodes[, 2],
+        N1 = link_nodes[, 3]
+      )
+  } else {
+    df_link <- df_link %>%
+      separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
+      mutate(
+        N0 = str_remove_all(N0, fixed(overlay_spec$NodeSuffix)),
+        N1 = str_remove_all(N1, fixed(overlay_spec$NodeSuffix))
+      )
+  }
+
+  df_link %>%
+    mutate(
+      Scenario = scenario_name,
+      Symbol = value_symbol,
+      N0_plot = if (direction == "backward") N1 else N0,
+      N1_plot = if (direction == "backward") N0 else N1,
+      N0 = N0_plot,
+      N1 = N1_plot
+    ) %>%
+    select(-N0_plot, -N1_plot)
+}
+
+make_transport_edges_sf <- function(df_link, nodes_tbl) {
+  missing_nodes <- setdiff(unique(c(df_link$N0, df_link$N1)), nodes_tbl$N_PSY)
+  if (length(missing_nodes) > 0) {
+    stop("Missing transport node coordinates: ", paste(missing_nodes, collapse = ", "))
+  }
+
+  edges <- df_link %>%
+    inner_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+    rename(x0 = lon, y0 = lat) %>%
+    inner_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+    rename(x1 = lon, y1 = lat) %>%
+    filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1)) %>%
+    filter(Value > 0)
+
+  if (nrow(edges) == 0) {
+    return(st_sf(edges, geometry = st_sfc(crs = 4326)))
+  }
+
+  lines_sfc <- pmap(
+    edges[, c("x0", "y0", "x1", "y1")],
+    ~ st_linestring(matrix(c(..1, ..2, ..3, ..4), ncol = 2, byrow = TRUE))
+  )
+
+  st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+}
+
+plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, overlay_spec) {
+  if (nrow(edges_sf) == 0) {
+    warning("No plottable combined transport links for scenario: ", scenario_name, " / ", overlay_spec$Carrier)
+    return(NULL)
+  }
+
+  plot_data <- map_data %>%
+    filter(Scenario == scenario_name, Variable == overlay_spec$DemandVariable)
+
+  fill_colors <- if (overlay_spec$DemandVariable == "Sec_Ene_Hyd_Amm") {
+    c(low = "#fbf7ff", high = "#54278f")
+  } else {
+    c(low = "#f7fbff", high = "#08306b")
+  }
+
+  vmax <- max(edges_sf$Value, na.rm = TRUE)
+  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
+  brks <- brks[brks <= vmax]
+  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+
+  edges_plot_df <- edges_sf %>%
+    mutate(Value_plot = log10(1 + Value)) %>%
+    st_drop_geometry()
+  edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
+  edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
+
+  ggplot() +
+    geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
+    geom_segment(
+      data = edges_line_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
+      alpha = 0.82,
+      lineend = "round"
+    ) +
+    geom_segment(
+      data = edges_arrow_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
+      alpha = 0.82,
+      lineend = "round",
+      arrow = arrow(length = unit(1.45, "mm"), type = "closed")
+    ) +
+    scale_fill_gradient(
+      low = fill_colors[["low"]],
+      high = fill_colors[["high"]],
+      na.value = "grey92",
+      labels = scales::label_number(accuracy = 0.01),
+      name = "Demand (EJ/yr)"
+    ) +
+    scale_linewidth_continuous(
+      range = c(0.25, 1.45),
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 1)(brks),
+      name = "vff_l / vfb_l annual flow (GWh/yr)"
+    ) +
+    scale_color_gradient(
+      low = "#ffd34d",
+      high = "#b2182b",
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 1)(brks),
+      name = "vff_l / vfb_l annual flow (GWh/yr)"
+    ) +
+    coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.box = "horizontal",
+      legend.box.spacing = unit(4, "mm"),
+      legend.margin = margin(t = 0, r = 1, b = 0, l = 1, unit = "mm"),
+      legend.background = element_blank(),
+      legend.key.width = unit(16, "mm"),
+      legend.key.height = unit(3, "mm"),
+      legend.title = element_text(size = 7),
+      legend.text = element_text(size = 6.5),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) +
+    guides(
+      fill = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        barwidth = unit(48, "mm"),
+        barheight = unit(3, "mm")
+      ),
+      color = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        barwidth = unit(48, "mm"),
+        barheight = unit(3, "mm")
+      ),
+      linewidth = "none"
+    ) +
+    labs(
+      title = paste0(
+        scenario_name,
+        " ",
+        overlay_spec$TitleLabel,
+        " demand and combined transport flow (",
+        plot_year,
+        ")"
+      )
+    )
+}
+
+if (!file.exists(node_path)) {
+  stop("Missing node coordinate file: ", node_path)
+}
+
+if (!file.exists(nh3_node_csv)) {
+  stop(
+    "Missing NH3 node coordinate CSV: ",
+    nh3_node_csv,
+    ". Run code/worldmap_plot.R first."
+  )
+}
+
+h2_nodes_tbl <- st_read(node_path, quiet = TRUE) %>%
+  st_drop_geometry() %>%
+  transmute(
+    N_PSY,
+    lon = as.numeric(centroid_x),
+    lat = as.numeric(centroid_y)
+  )
+
+nh3_nodes_tbl <- read.csv(nh3_node_csv, stringsAsFactors = FALSE) %>%
+  transmute(N_PSY, lon = as.numeric(lon), lat = as.numeric(lat))
+
+for (i in seq_len(nrow(overlay_specs))) {
+  overlay_spec <- overlay_specs[i, ]
+  nodes_tbl <- if (overlay_spec$Carrier == "NH3") nh3_nodes_tbl else h2_nodes_tbl
+
+  for (scenario_name in scenarios) {
+    edges_combined_sf <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
+      read_transport_value(
+        scenario_name = scenario_name,
+        overlay_spec = overlay_spec,
+        flow_spec = flow_specs[j, ]
+      )
+    }) %>%
+      make_transport_edges_sf(nodes_tbl)
+
+    p <- plot_demand_transport_overlay(
+      map_data = map_data,
+      edges_sf = edges_combined_sf,
+      scenario_name = scenario_name,
+      overlay_spec = overlay_spec
+    )
+    if (is.null(p)) next
+
+    ggsave(
+      filename = file.path(
+        overlay_dir,
+        paste0(
+          "global_",
+          scenario_name,
+          "_",
+          overlay_spec$DemandVariable,
+          "_vff_l_vfb_l_combined_",
+          overlay_spec$Carrier,
+          "_demand_transport_overlay_",
+          plot_year,
+          ".png"
+        )
+      ),
+      plot = p,
+      width = 300,
+      height = 150,
       units = "mm",
       dpi = 300,
       bg = "white"
