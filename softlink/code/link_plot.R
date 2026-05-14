@@ -22,8 +22,8 @@ sf_use_s2(FALSE)
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink"
 region <- "global"
-date <- "2604281658"
-scenarios <- c("300C", "700C")
+date <- "2605131516"
+scenarios <- c("300C-LimCCS_bio", "300C-LimCCS", "300C", "Baseline")
 plot_year <- 2050
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
@@ -36,7 +36,7 @@ softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = F
 }
 data_dir <- file.path(softlink_dir, "data")
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
-out_dir <- file.path(softlink_dir, "output", "global_softlink", "global_12day")
+base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link",   "AC",     "AC",            "plasma",
@@ -423,10 +423,11 @@ walk(seq_len(nrow(link_types)), function(i) {
 
   walk(seq_len(nrow(value_specs)), function(j) {
     value_spec <- value_specs[j, ]
-    plot_dir <- file.path(out_dir, spec$Folder, value_spec$Symbol)
-    dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 
     for (scenario_name in scenarios) {
+      plot_dir <- file.path(base_dir, scenario_name, spec$Folder, value_spec$Symbol)
+      dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+
       edges_sf <- read_link_value(
         scenario_name = scenario_name,
         link_pattern = spec$Pattern,
@@ -469,13 +470,13 @@ walk(seq_len(nrow(link_types)), function(i) {
     }
   })
 
-  combined_dir <- file.path(out_dir, spec$Folder, "vff_l_vfb_l_combined")
-  dir.create(combined_dir, recursive = TRUE, showWarnings = FALSE)
-
   flow_specs <- value_specs %>%
     filter(Symbol %in% c("vff_l", "vfb_l"))
 
   for (scenario_name in scenarios) {
+    combined_dir <- file.path(base_dir, scenario_name, spec$Folder, "vff_l_vfb_l_combined")
+    dir.create(combined_dir, recursive = TRUE, showWarnings = FALSE)
+
     edges_combined_sf <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
       read_link_value(
         scenario_name = scenario_name,
@@ -520,7 +521,6 @@ walk(seq_len(nrow(link_types)), function(i) {
 # NH3 trade flow plots --------------------------------------------------------
 
 nh3_plot_threshold <- 1
-nh3_dir <- file.path(out_dir, "plot_trade_nh3")
 
 if (!file.exists(nh3_node_csv)) {
   stop(
@@ -532,8 +532,6 @@ if (!file.exists(nh3_node_csv)) {
 
 nh3_nodes_tbl <- read.csv(nh3_node_csv, stringsAsFactors = FALSE) %>%
   transmute(N_PSY, lon = as.numeric(lon), lat = as.numeric(lat))
-
-dir.create(nh3_dir, recursive = TRUE, showWarnings = FALSE)
 
 read_nh3_trade_value <- function(scenario_name, value_spec) {
   gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -613,10 +611,11 @@ nh3_value_specs <- value_specs %>%
 
 walk(seq_len(nrow(nh3_value_specs)), function(j) {
   value_spec <- nh3_value_specs[j, ]
-  plot_dir <- file.path(nh3_dir, value_spec$Symbol)
-  dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 
   for (scenario_name in scenarios) {
+    plot_dir <- file.path(base_dir, scenario_name, "plot_trade_nh3", value_spec$Symbol)
+    dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+
     edges_sf <- read_nh3_trade_value(
       scenario_name = scenario_name,
       value_spec = value_spec
@@ -655,10 +654,10 @@ walk(seq_len(nrow(nh3_value_specs)), function(j) {
   }
 })
 
-nh3_combined_dir <- file.path(nh3_dir, "vff_l_vfb_l_combined")
-dir.create(nh3_combined_dir, recursive = TRUE, showWarnings = FALSE)
-
 for (scenario_name in scenarios) {
+  nh3_combined_dir <- file.path(base_dir, scenario_name, "plot_trade_nh3", "vff_l_vfb_l_combined")
+  dir.create(nh3_combined_dir, recursive = TRUE, showWarnings = FALSE)
+
   edges_combined_sf <- map_dfr(seq_len(nrow(nh3_value_specs)), function(j) {
     read_nh3_trade_value(
       scenario_name = scenario_name,

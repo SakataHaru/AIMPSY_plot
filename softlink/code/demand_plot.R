@@ -23,9 +23,9 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink"
 region <- "global"
-date <- "2604281658"
+date <- "2605131516"
 plot_year <- 2050
-scenarios <- c("300C", "700C")
+scenarios <- c("300C-LimCCS_bio", "300C-LimCCS", "300C", "Baseline")
 target_vars <- c("Sec_Ene_Hyd", "Sec_Ene_Hyd_Amm", "Sec_Ene_Ele_Tra_Los_Tra")
 generation_var <- "Sec_Ene_Ele"
 read_vars <- unique(c(target_vars, generation_var))
@@ -38,10 +38,9 @@ softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = F
 
 main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
 gdx_path <- file.path(main_dir, "merged_output.gdx")
-out_dir <- file.path(softlink_dir, "output", "global_softlink", "global_12day", "plot_demand_map")
+base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
 data_dir <- file.path(softlink_dir, "data")
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
-dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 build_region_map <- function() {
   tribble(
@@ -266,13 +265,16 @@ map_data <- region_boundaries %>%
   left_join(demand_values, by = c("region" = "Region"))
 
 for (scenario_name in scenarios) {
+  scenario_out_dir <- file.path(base_dir, scenario_name, "plot_demand_map")
+  dir.create(scenario_out_dir, recursive = TRUE, showWarnings = FALSE)
+
   for (variable_name in target_vars) {
     p <- plot_demand_map(map_data, scenario_name, variable_name, loss_share_labels)
     print(p)
 
     ggsave(
       filename = file.path(
-        out_dir,
+        scenario_out_dir,
         paste0("global_", scenario_name, "_", variable_name, "_demand_map_", plot_year, ".png")
       ),
       plot = p,
@@ -291,8 +293,6 @@ prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_p
 data_dir <- file.path(softlink_dir, "data")
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson"
-overlay_dir <- file.path(out_dir, "demand_transport_overlay")
-dir.create(overlay_dir, recursive = TRUE, showWarnings = FALSE)
 
 arrow_threshold <- 10
 
@@ -544,6 +544,9 @@ for (i in seq_len(nrow(overlay_specs))) {
   nodes_tbl <- if (overlay_spec$Carrier == "NH3") nh3_nodes_tbl else h2_nodes_tbl
 
   for (scenario_name in scenarios) {
+    overlay_dir <- file.path(base_dir, scenario_name, "plot_demand_map", "demand_transport_overlay")
+    dir.create(overlay_dir, recursive = TRUE, showWarnings = FALSE)
+
     edges_combined_sf <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
       read_transport_value(
         scenario_name = scenario_name,
