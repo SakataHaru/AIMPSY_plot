@@ -422,6 +422,25 @@ plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, ove
     geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
     geom_segment(
       data = edges_line_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1),
+      color = "white",
+      linewidth = 0.9,
+      alpha = 0.75,
+      lineend = "round",
+      show.legend = FALSE
+    ) +
+    geom_segment(
+      data = edges_arrow_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1),
+      color = "white",
+      linewidth = 0.9,
+      alpha = 0.75,
+      lineend = "round",
+      arrow = arrow(length = unit(1.55, "mm"), type = "closed"),
+      show.legend = FALSE
+    ) +
+    geom_segment(
+      data = edges_line_df,
       aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
       alpha = 0.82,
       lineend = "round"
