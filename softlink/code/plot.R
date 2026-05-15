@@ -31,7 +31,7 @@ region_list <- c(
 )
 
 target_scenarios <- c("300C-LimCCS_bio", "300C-LimCCS", "300C", "Baseline")
-target_years <- seq(2020, 2050, by = 5)
+target_years <- seq(2005, 2050, by = 5)
 softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
   "."
 } else {
@@ -382,9 +382,9 @@ for (scenario_name in target_scenarios) {
   )
 
   loss_share_specs <- tribble(
-    ~denominator_var, ~denominator_label,             ~denominator_model,      ~file_tag,
-    "Sec_Ene_Ele",    "model-specific Sec_Ene_Ele",   NA_character_,           "SecEneEle",
-    "Fin_Ene_Ele",    "AIM-Technology Fin_Ene_Ele",   "Energy system model",   "AIMTechnologyFinEneEle"
+    ~denominator_var, ~denominator_label,             ~denominator_model,      ~file_tag,                  ~rate_label,
+    "Sec_Ene_Ele",    "model-specific Sec_Ene_Ele",   NA_character_,           "SecEneEle",                "loss/sup",
+    "Fin_Ene_Ele",    "AIM-Technology Fin_Ene_Ele",   "Energy system model",   "AIMTechnologyFinEneEle",   "loss/(dem+loss)"
   )
 
   for (j in seq_len(nrow(loss_share_specs))) {
@@ -406,8 +406,15 @@ for (scenario_name in target_scenarios) {
       filter(Variable == "Sec_Ene_Ele_Tra_Los", Scenario == scenario_name) %>%
       select(Scenario, Region, Year, Model, Case, TransmissionLoss = Value) %>%
       inner_join(d_denominator, by = join_keys) %>%
-      filter(!is.na(Denominator), Denominator > 0) %>%
-      mutate(LossShare = 100 * TransmissionLoss / Denominator)
+      mutate(
+        RateDenominator = if (loss_share_specs$file_tag[j] == "SecEneEle") {
+          Denominator
+        } else {
+          Denominator + TransmissionLoss
+        }
+      ) %>%
+      filter(!is.na(RateDenominator), RateDenominator > 0) %>%
+      mutate(LossShare = 100 * TransmissionLoss / RateDenominator)
 
     d_split_share <- df_plot %>%
       filter(
@@ -417,7 +424,12 @@ for (scenario_name in target_scenarios) {
       ) %>%
       select(Scenario, Region, Year, Model, Case, Variable, SplitLoss = Value) %>%
       inner_join(d_denominator, by = join_keys) %>%
-      filter(!is.na(Denominator), Denominator > 0) %>%
+      inner_join(
+        d_loss_share %>%
+          select(Scenario, Region, Year, Model, Case, TransmissionLoss, RateDenominator),
+        by = c("Scenario", "Region", "Year", "Model", "Case")
+      ) %>%
+      filter(!is.na(RateDenominator), RateDenominator > 0) %>%
       mutate(
         LossType = recode(
           Variable,
@@ -425,7 +437,7 @@ for (scenario_name in target_scenarios) {
           "Sec_Ene_Ele_Tra_Los_Tra" = "Transmission loss"
         ),
         LossType = factor(LossType, levels = c("Distribution loss", "Transmission loss")),
-        LossShare = 100 * SplitLoss / Denominator
+        LossShare = 100 * SplitLoss / RateDenominator
       )
 
     d_area_share <- d_split_share %>%
@@ -460,8 +472,8 @@ for (scenario_name in target_scenarios) {
       scale_fill_manual(values = transmission_fill, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
-        y = "Transmission loss rate (%)",
-        title = paste0("Transmission loss rate relative to ", loss_share_specs$denominator_label[j], " (", scenario_name, ", ", case_name, ")")
+        y = paste0(loss_share_specs$rate_label[j], " (%)"),
+        title = paste0(loss_share_specs$rate_label[j], " (", scenario_name, ", ", case_name, ")")
       ) +
       MyTheme +
       theme(
