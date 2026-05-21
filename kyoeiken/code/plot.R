@@ -18,7 +18,7 @@ case_name <- "Global softlink model comparison"
 aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
 scenario <- 'global_softlink'
 region <- 'global'
-power_dates <- c("PSM-12DAY" = "2605131516", "PSM-6HOUR" = "2605141552")
+power_dates <- c("PSM-6HOUR" = "2605141552")
 power_main_dirs <- file.path(aimpsy, scenario, region, power_dates, "main")
 names(power_main_dirs) <- names(power_dates)
 energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605111701/main"
@@ -33,14 +33,15 @@ region_list <- c(
 
 target_scenarios <- c("300C")
 target_years <- seq(2005, 2050, by = 5)
-softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
+kyoeiken_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "kyoeiken") {
   "."
 } else {
-  "softlink"
+  "kyoeiken"
 }
-base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
+base_dir <- file.path(kyoeiken_dir, "output")
 
-model_color <- c("AIM-Technology" = "black", "PSM-12DAY" = "#1f78b4", "PSM-6HOUR" = "#e31a1c")
+model_color <- c("AIM-Technology" = "black", "PSM-6HOUR" = "#e31a1c")
+model_label <- c("AIM-Technology" = "AIM-Technology", "PSM-6HOUR" = "電力システムモデル")
 point_shape <- 16
 
 MyTheme <- theme_bw() +
@@ -94,7 +95,6 @@ read_iamc_gdx <- function(main_dir, model_name) {
 
 df_base_region <- bind_rows(
   read_iamc_gdx(energy_main_dir, "AIM-Technology"),
-  read_iamc_gdx(power_main_dirs[["PSM-12DAY"]], "PSM-12DAY"),
   read_iamc_gdx(power_main_dirs[["PSM-6HOUR"]], "PSM-6HOUR")
 ) %>%
   filter(
@@ -179,7 +179,7 @@ capacity_specs <- tribble(
 )
 
 for (scenario_name in target_scenarios) {
-  out_dir <- file.path(base_dir, scenario_name, "plot_capacity")
+  out_dir <- file.path(base_dir, "plot_capacity")
 
   for (i in seq_len(nrow(capacity_specs))) {
     d <- df_plot %>%
@@ -190,7 +190,7 @@ for (scenario_name in target_scenarios) {
       geom_line(linewidth = 0.35) +
       geom_point(shape = point_shape, size = 1.8, stroke = 0.5) +
       expand_limits(y = 0) +
-      scale_color_manual(values = model_color, drop = FALSE) +
+      scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
         y = capacity_specs$ylab[i],
@@ -219,7 +219,7 @@ eleuse_specs <- tribble(
 )
 
 for (scenario_name in target_scenarios) {
-  out_dir <- file.path(base_dir, scenario_name, "plot_eleuse")
+  out_dir <- file.path(base_dir, "plot_eleuse")
 
   for (i in seq_len(nrow(eleuse_specs))) {
     d <- df_plot %>%
@@ -230,7 +230,7 @@ for (scenario_name in target_scenarios) {
       geom_line(linewidth = 0.35) +
       geom_point(shape = point_shape, size = 1.8, stroke = 0.5) +
       expand_limits(y = 0) +
-      scale_color_manual(values = model_color, drop = FALSE) +
+      scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
         y = eleuse_specs$ylab[i],
@@ -263,7 +263,7 @@ gw_to_mw <- 1000
 hours_per_year <- 8760
 
 for (scenario_name in target_scenarios) {
-  out_dir <- file.path(base_dir, scenario_name, "plot_CF")
+  out_dir <- file.path(base_dir, "plot_CF")
 
   for (i in seq_len(nrow(cf_specs))) {
     d_gen <- df_plot %>%
@@ -284,7 +284,7 @@ for (scenario_name in target_scenarios) {
       geom_line(linewidth = 0.35) +
       geom_point(shape = point_shape, size = 1.8, stroke = 0.5) +
       expand_limits(y = 0) +
-      scale_color_manual(values = model_color, drop = FALSE) +
+      scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
         y = "Capacity factor (%)",
@@ -313,7 +313,7 @@ transmission_fill <- c(
 )
 
 for (scenario_name in target_scenarios) {
-  out_dir <- file.path(base_dir, scenario_name, "plot_transmission")
+  out_dir <- file.path(base_dir, "plot_transmission")
   old_loss_share_file <- file.path(out_dir, paste0(scenario_name, "_TransmissionLossShare_global_softlink_31reg_world.png"))
   if (file.exists(old_loss_share_file)) file.remove(old_loss_share_file)
 
@@ -324,7 +324,7 @@ for (scenario_name in target_scenarios) {
     filter(
       Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
       Scenario == scenario_name,
-      Model %in% c("PSM-12DAY", "PSM-6HOUR")
+      Model == "PSM-6HOUR"
     ) %>%
     mutate(
       LossType = recode(
@@ -363,7 +363,7 @@ for (scenario_name in target_scenarios) {
       stroke = 0.5
     ) +
     expand_limits(y = 0) +
-    scale_color_manual(values = model_color, drop = FALSE) +
+    scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
     scale_fill_manual(values = transmission_fill, drop = FALSE) +
     facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
     labs(
@@ -422,7 +422,7 @@ for (scenario_name in target_scenarios) {
       filter(
         Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
         Scenario == scenario_name,
-        Model %in% c("PSM-12DAY", "PSM-6HOUR")
+        Model == "PSM-6HOUR"
       ) %>%
       select(Scenario, Region, Year, Model, Case, Variable, SplitLoss = Value) %>%
       inner_join(d_denominator, by = join_keys) %>%
@@ -470,7 +470,7 @@ for (scenario_name in target_scenarios) {
         stroke = 0.5
       ) +
       expand_limits(y = 0) +
-      scale_color_manual(values = model_color, drop = FALSE) +
+      scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
       scale_fill_manual(values = transmission_fill, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
@@ -505,7 +505,7 @@ hydrogen_gw_to_mw <- 1000
 hydrogen_hours_per_year <- 8760
 
 for (scenario_name in target_scenarios) {
-  out_dir <- file.path(base_dir, scenario_name, "plot_hydrogen")
+  out_dir <- file.path(base_dir, "plot_hydrogen")
 
   for (i in seq_len(nrow(hydrogen_specs))) {
     d <- df_plot %>%
@@ -516,7 +516,7 @@ for (scenario_name in target_scenarios) {
       geom_line(linewidth = 0.35) +
       geom_point(shape = point_shape, size = 1.8, stroke = 0.5) +
       expand_limits(y = 0) +
-      scale_color_manual(values = model_color, drop = FALSE) +
+      scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
         y = hydrogen_specs$ylab[i],
@@ -558,7 +558,7 @@ for (scenario_name in target_scenarios) {
       geom_line(linewidth = 0.35) +
       geom_point(shape = point_shape, size = 1.8, stroke = 0.5) +
       expand_limits(y = 0) +
-      scale_color_manual(values = model_color, drop = FALSE) +
+      scale_color_manual(values = model_color, labels = model_label, drop = FALSE) +
       facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
       labs(
         y = "Capacity factor (%)",
@@ -639,7 +639,6 @@ for (scenario_name in target_scenarios) {
     plot = p,
     filename = file.path(
       base_dir,
-      scenario_name,
       "plot_power",
       paste0(scenario_name, "_power_generation_2050_global_softlink_31reg_world.png")
     ),

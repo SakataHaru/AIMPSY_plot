@@ -36,7 +36,12 @@ softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = F
 }
 data_dir <- file.path(softlink_dir, "data")
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
-base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
+kyoeiken_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "kyoeiken") {
+  "."
+} else {
+  "kyoeiken"
+}
+base_dir <- file.path(kyoeiken_dir, "output")
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link",   "AC",     "AC",            "plasma",
@@ -425,7 +430,7 @@ walk(seq_len(nrow(link_types)), function(i) {
     value_spec <- value_specs[j, ]
 
     for (scenario_name in scenarios) {
-      plot_dir <- file.path(base_dir, scenario_name, spec$Folder, value_spec$Symbol)
+      plot_dir <- file.path(base_dir, spec$Folder, value_spec$Symbol)
       dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 
       edges_sf <- read_link_value(
@@ -474,7 +479,7 @@ walk(seq_len(nrow(link_types)), function(i) {
     filter(Symbol %in% c("vff_l", "vfb_l"))
 
   for (scenario_name in scenarios) {
-    combined_dir <- file.path(base_dir, scenario_name, spec$Folder, "vff_l_vfb_l_combined")
+    combined_dir <- file.path(base_dir, spec$Folder, "vff_l_vfb_l_combined")
     dir.create(combined_dir, recursive = TRUE, showWarnings = FALSE)
 
     edges_combined_sf <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
@@ -613,7 +618,7 @@ walk(seq_len(nrow(nh3_value_specs)), function(j) {
   value_spec <- nh3_value_specs[j, ]
 
   for (scenario_name in scenarios) {
-    plot_dir <- file.path(base_dir, scenario_name, "plot_trade_nh3", value_spec$Symbol)
+    plot_dir <- file.path(base_dir, "plot_trade_nh3", value_spec$Symbol)
     dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 
     edges_sf <- read_nh3_trade_value(
@@ -655,7 +660,7 @@ walk(seq_len(nrow(nh3_value_specs)), function(j) {
 })
 
 for (scenario_name in scenarios) {
-  nh3_combined_dir <- file.path(base_dir, scenario_name, "plot_trade_nh3", "vff_l_vfb_l_combined")
+  nh3_combined_dir <- file.path(base_dir, "plot_trade_nh3", "vff_l_vfb_l_combined")
   dir.create(nh3_combined_dir, recursive = TRUE, showWarnings = FALSE)
 
   edges_combined_sf <- map_dfr(seq_len(nrow(nh3_value_specs)), function(j) {
