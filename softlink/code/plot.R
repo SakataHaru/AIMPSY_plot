@@ -18,8 +18,9 @@ case_name <- "Global softlink model comparison"
 aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
 scenario <- 'global_softlink'
 region <- 'global'
-date <- '2605131516'
-power_main_dir <- paste0(aimpsy, "/", scenario, "/", region, "/", date, "/main")
+power_dates <- c("PSM-12DAY" = "2605131516", "PSM-6HOUR" = "2605141552")
+power_main_dirs <- file.path(aimpsy, scenario, region, power_dates, "main")
+names(power_main_dirs) <- names(power_dates)
 energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605111701/main"
 
 region_list <- c(
@@ -30,7 +31,7 @@ region_list <- c(
   "XAF", "XNF"
 )
 
-target_scenarios <- c("300C-LimCCS_bio", "300C-LimCCS", "300C", "Baseline")
+target_scenarios <- c("300C")
 target_years <- seq(2005, 2050, by = 5)
 softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
   "."
@@ -39,7 +40,7 @@ softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = F
 }
 base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
 
-model_color <- c("Energy system model" = "#1f78b4", "Power model" = "#e31a1c")
+model_color <- c("AIM-Technology" = "black", "PSM-12DAY" = "#1f78b4", "PSM-6HOUR" = "#e31a1c")
 point_shape <- 16
 
 MyTheme <- theme_bw() +
@@ -92,8 +93,9 @@ read_iamc_gdx <- function(main_dir, model_name) {
 }
 
 df_base_region <- bind_rows(
-  read_iamc_gdx(energy_main_dir, "Energy system model"),
-  read_iamc_gdx(power_main_dir, "Power model")
+  read_iamc_gdx(energy_main_dir, "AIM-Technology"),
+  read_iamc_gdx(power_main_dirs[["PSM-12DAY"]], "PSM-12DAY"),
+  read_iamc_gdx(power_main_dirs[["PSM-6HOUR"]], "PSM-6HOUR")
 ) %>%
   filter(
     Region %in% region_list,
@@ -322,7 +324,7 @@ for (scenario_name in target_scenarios) {
     filter(
       Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
       Scenario == scenario_name,
-      Model == "Power model"
+      Model %in% c("PSM-12DAY", "PSM-6HOUR")
     ) %>%
     mutate(
       LossType = recode(
@@ -334,7 +336,7 @@ for (scenario_name in target_scenarios) {
     )
 
   d_area <- d_split %>%
-    group_by(Scenario, Region, Year) %>%
+    group_by(Scenario, Region, Model, Year) %>%
     arrange(LossType, .by_group = TRUE) %>%
     mutate(
       ymax = cumsum(Value),
@@ -345,7 +347,7 @@ for (scenario_name in target_scenarios) {
   p <- ggplot() +
     geom_ribbon(
       data = d_area,
-      aes(Year, ymin = ymin, ymax = ymax, fill = LossType, group = interaction(Region, LossType)),
+      aes(Year, ymin = ymin, ymax = ymax, fill = LossType, group = interaction(Region, Model, LossType)),
       alpha = 0.35
     ) +
     geom_line(
@@ -384,7 +386,7 @@ for (scenario_name in target_scenarios) {
   loss_share_specs <- tribble(
     ~denominator_var, ~denominator_label,             ~denominator_model,      ~file_tag,                  ~rate_label,
     "Sec_Ene_Ele",    "model-specific Sec_Ene_Ele",   NA_character_,           "SecEneEle",                "loss/sup",
-    "Fin_Ene_Ele",    "AIM-Technology Fin_Ene_Ele",   "Energy system model",   "AIMTechnologyFinEneEle",   "loss/(dem+loss)"
+    "Fin_Ene_Ele",    "AIM-Technology Fin_Ene_Ele",   "AIM-Technology",        "AIMTechnologyFinEneEle",   "loss/(dem+loss)"
   )
 
   for (j in seq_len(nrow(loss_share_specs))) {
@@ -420,7 +422,7 @@ for (scenario_name in target_scenarios) {
       filter(
         Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
         Scenario == scenario_name,
-        Model == "Power model"
+        Model %in% c("PSM-12DAY", "PSM-6HOUR")
       ) %>%
       select(Scenario, Region, Year, Model, Case, Variable, SplitLoss = Value) %>%
       inner_join(d_denominator, by = join_keys) %>%
@@ -441,7 +443,7 @@ for (scenario_name in target_scenarios) {
       )
 
     d_area_share <- d_split_share %>%
-      group_by(Scenario, Region, Year) %>%
+      group_by(Scenario, Region, Model, Year) %>%
       arrange(LossType, .by_group = TRUE) %>%
       mutate(
         ymax = cumsum(LossShare),
@@ -452,7 +454,7 @@ for (scenario_name in target_scenarios) {
     p <- ggplot() +
       geom_ribbon(
         data = d_area_share,
-        aes(Year, ymin = ymin, ymax = ymax, fill = LossType, group = interaction(Region, LossType)),
+        aes(Year, ymin = ymin, ymax = ymax, fill = LossType, group = interaction(Region, Model, LossType)),
         alpha = 0.35
       ) +
       geom_line(

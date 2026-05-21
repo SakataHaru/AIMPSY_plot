@@ -22,8 +22,8 @@ sf_use_s2(FALSE)
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink"
 region <- "global"
-date <- "2605131516"
-scenarios <- c("300C-LimCCS_bio", "300C-LimCCS", "300C", "Baseline")
+date <- "2605141552"
+scenarios <- c("300C")
 plot_year <- 2050
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
