@@ -641,3 +641,307 @@ for (scenario_name in target_scenarios) {
     height = 300
   )
 }
+
+# scenario_analysis -----------------------------------------------------------
+# Compare all target scenarios in one plot.
+scenario_analysis_dir <- file.path(base_dir, "scenario_anarysis")
+
+scenario_shape <- c(
+  "300C" = 16,
+  "300C-LimCCS" = 17,
+  "300C-LimCCS_bio" = 15
+)
+
+scenario_line_levels <- c(
+  paste("AIM-Technology", target_scenarios, sep = " | "),
+  paste("PSM-12DAY", target_scenarios, sep = " | ")
+)
+
+scenario_line_color <- c(
+  "AIM-Technology | 300C" = "#000000",
+  "AIM-Technology | 300C-LimCCS" = "#666666",
+  "AIM-Technology | 300C-LimCCS_bio" = "#bdbdbd",
+  "PSM-12DAY | 300C" = "#99000d",
+  "PSM-12DAY | 300C-LimCCS" = "#e31a1c",
+  "PSM-12DAY | 300C-LimCCS_bio" = "#fb6a4a"
+)
+
+prep_scenario_line_data <- function(d, value_col = "Value") {
+  d %>%
+    mutate(
+      Scenario = factor(as.character(Scenario), levels = target_scenarios),
+      Model = factor(as.character(Model), levels = names(model_color)),
+      ModelScenario = factor(paste(Model, Scenario, sep = " | "), levels = scenario_line_levels),
+      Region = factor(as.character(Region), levels = region_list_plot)
+    ) %>%
+    filter(!is.na(.data[[value_col]]))
+}
+
+save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, width = 260, height = 260) {
+  if (nrow(d) == 0) return(invisible(FALSE))
+
+  d <- prep_scenario_line_data(d, y_col)
+
+  p <- ggplot(
+    d,
+    aes(
+      x = Year,
+      y = .data[[y_col]],
+      color = ModelScenario,
+      shape = Scenario,
+      group = interaction(Region, Model, Scenario)
+    )
+  ) +
+    geom_line(linewidth = 0.35) +
+    geom_point(size = 1.8, stroke = 0.5) +
+    expand_limits(y = 0) +
+    scale_color_manual(values = scenario_line_color, drop = FALSE, name = "Model / Scenario") +
+    scale_shape_manual(values = scenario_shape, drop = FALSE, name = "Scenario") +
+    facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
+    labs(y = ylab, title = title) +
+    MyTheme +
+    theme(
+      legend.position = "bottom",
+      strip.text = element_text(size = 8),
+      axis.text = element_text(size = 7),
+      axis.title.x = element_blank()
+    )
+
+  save_png(
+    plot = p,
+    filename = file.path(scenario_analysis_dir, folder, filename),
+    width = width,
+    height = height
+  )
+}
+
+scenario_raw_line_specs <- bind_rows(
+  capacity_specs %>%
+    mutate(folder = "plot_capacity", file_prefix = "scenario_analysis_capacity"),
+  eleuse_specs %>%
+    mutate(folder = "plot_eleuse", file_prefix = "scenario_analysis_eleuse"),
+  tribble(
+    ~var,                    ~ylab,                                  ~title,                           ~fname,                                                        ~folder,              ~file_prefix,
+    "Sec_Ene_Ele_Tra_Los",   "Transmission Loss (EJ/yr)",            "Transmission loss",               "TransmissionLoss_global_softlink_31reg_world.png",            "plot_transmission",  "scenario_analysis_transmission",
+    "Sec_Ene_Hyd",           "Hydrogen production (EJ/yr)",          "Hydrogen production",             "Hyd_global_softlink_Production_31reg_world.png",              "plot_hydrogen",      "scenario_analysis_hydrogen",
+    "Sec_Ene_Hyd_Ele",       "Hydrogen from electrolysis (EJ/yr)",   "Hydrogen from electrolysis",      "Hyd_global_softlink_Electrolysis_31reg_world.png",            "plot_hydrogen",      "scenario_analysis_hydrogen",
+    "Sec_Ene_Inp_Ele_Hyd",   "Electricity input to hydrogen (EJ/yr)","Electricity input to hydrogen",   "Hyd_global_softlink_ElectricityInput_31reg_world.png",        "plot_hydrogen",      "scenario_analysis_hydrogen"
+  )
+)
+
+for (i in seq_len(nrow(scenario_raw_line_specs))) {
+  d <- df_plot %>% filter(Variable == scenario_raw_line_specs$var[i])
+
+  save_scenario_line_plot(
+    d = d,
+    y_col = "Value",
+    ylab = scenario_raw_line_specs$ylab[i],
+    title = paste0(scenario_raw_line_specs$title[i], " scenario comparison (", case_name, ")"),
+    filename = paste0(scenario_raw_line_specs$file_prefix[i], "_", scenario_raw_line_specs$var[i], ".png"),
+    folder = scenario_raw_line_specs$folder[i]
+  )
+}
+
+for (i in seq_len(nrow(cf_specs))) {
+  d_gen <- df_plot %>%
+    filter(Variable == cf_specs$gen_var[i]) %>%
+    select(Scenario, Region, Year, Model, Case, GenerationEJ = Value)
+
+  d_cap <- df_plot %>%
+    filter(Variable == cf_specs$cap_var[i]) %>%
+    select(Scenario, Region, Year, Model, Case, CapacityGW = Value)
+
+  d_cf <- d_gen %>%
+    inner_join(d_cap, by = c("Scenario", "Region", "Year", "Model", "Case")) %>%
+    filter(!is.na(CapacityGW), CapacityGW > 0) %>%
+    mutate(CapacityFactor = 100 * GenerationEJ * ej_to_mwh / (CapacityGW * gw_to_mw * hours_per_year))
+
+  save_scenario_line_plot(
+    d = d_cf,
+    y_col = "CapacityFactor",
+    ylab = "Capacity factor (%)",
+    title = paste0(cf_specs$tech[i], " capacity factor scenario comparison (", case_name, ")"),
+    filename = paste0("scenario_analysis_CF_", cf_specs$file_tag[i], "_global_softlink_31reg_world.png"),
+    folder = "plot_CF"
+  )
+}
+
+for (j in seq_len(nrow(loss_share_specs))) {
+  d_denominator <- df_plot %>% filter(Variable == loss_share_specs$denominator_var[j])
+
+  if (is.na(loss_share_specs$denominator_model[j])) {
+    d_denominator <- d_denominator %>%
+      select(Scenario, Region, Year, Model, Case, Denominator = Value)
+    join_keys <- c("Scenario", "Region", "Year", "Model", "Case")
+  } else {
+    d_denominator <- d_denominator %>%
+      filter(Model == loss_share_specs$denominator_model[j]) %>%
+      select(Scenario, Region, Year, Case, Denominator = Value)
+    join_keys <- c("Scenario", "Region", "Year", "Case")
+  }
+
+  d_loss_share <- df_plot %>%
+    filter(Variable == "Sec_Ene_Ele_Tra_Los") %>%
+    select(Scenario, Region, Year, Model, Case, TransmissionLoss = Value) %>%
+    inner_join(d_denominator, by = join_keys) %>%
+    mutate(
+      RateDenominator = if (loss_share_specs$file_tag[j] == "SecEneEle") {
+        Denominator
+      } else {
+        Denominator + TransmissionLoss
+      }
+    ) %>%
+    filter(!is.na(RateDenominator), RateDenominator > 0) %>%
+    mutate(LossShare = 100 * TransmissionLoss / RateDenominator)
+
+  save_scenario_line_plot(
+    d = d_loss_share,
+    y_col = "LossShare",
+    ylab = paste0(loss_share_specs$rate_label[j], " (%)"),
+    title = paste0(loss_share_specs$rate_label[j], " scenario comparison (", case_name, ")"),
+    filename = paste0("scenario_analysis_TransmissionLossShare_", loss_share_specs$file_tag[j], "_global_softlink_31reg_world.png"),
+    folder = "plot_transmission"
+  )
+}
+
+d_hyd_gen_all <- df_plot %>%
+  filter(Variable == "Sec_Ene_Hyd_Ele") %>%
+  select(Scenario, Region, Year, Model, Case, HydrogenFromElectrolysisEJ = Value)
+
+d_hyd_cap_all <- df_plot %>%
+  filter(Variable == "Cap_Hyd_Ele") %>%
+  select(Scenario, Region, Year, Model, Case, ElectrolyzerCapacityGW = Value)
+
+d_hyd_cf_all <- d_hyd_gen_all %>%
+  inner_join(d_hyd_cap_all, by = c("Scenario", "Region", "Year", "Model", "Case")) %>%
+  filter(!is.na(ElectrolyzerCapacityGW), ElectrolyzerCapacityGW > 0) %>%
+  mutate(
+    ElectrolyzerCapacityFactor =
+      100 * HydrogenFromElectrolysisEJ * hydrogen_ej_to_mwh /
+        (ElectrolyzerCapacityGW * hydrogen_gw_to_mw * hydrogen_hours_per_year)
+  )
+
+save_scenario_line_plot(
+  d = d_hyd_cf_all,
+  y_col = "ElectrolyzerCapacityFactor",
+  ylab = "Capacity factor (%)",
+  title = paste0("Electrolyzer capacity factor scenario comparison (", case_name, ")"),
+  filename = "scenario_analysis_Hyd_CF_Electrolysis_global_softlink_31reg_world.png",
+  folder = "plot_hydrogen"
+)
+
+power_model_label <- c("AIM-Technology" = "AIM", "PSM-12DAY" = "PSM")
+scenario_power_x_levels <- c(
+  "300C | AIM-Technology",
+  "300C | PSM-12DAY",
+  "300C-LimCCS | AIM-Technology",
+  "300C-LimCCS | PSM-12DAY",
+  "300C-LimCCS_bio | AIM-Technology",
+  "300C-LimCCS_bio | PSM-12DAY"
+)
+scenario_power_x_labels <- c(
+  "300C\nAIM",
+  "300C\nPSM",
+  "300C-LimCCS\nAIM",
+  "300C-LimCCS\nPSM",
+  "300C-LimCCS_bio\nAIM",
+  "300C-LimCCS_bio\nPSM"
+)
+names(scenario_power_x_labels) <- scenario_power_x_levels
+
+df_secele_scenario <- df_secele %>%
+  mutate(
+    Scenario = factor(as.character(Scenario), levels = target_scenarios),
+    Model = factor(as.character(Model), levels = names(model_color)),
+    ScenarioModel = factor(paste(Scenario, Model, sep = " | "), levels = scenario_power_x_levels),
+    Region = factor(as.character(Region), levels = region_list_plot)
+  )
+
+if (nrow(df_secele_scenario) > 0) {
+  p <- df_secele_scenario %>%
+    ggplot() +
+    geom_bar(aes(x = ScenarioModel, y = Value, fill = Variable), stat = "identity", width = 0.82) +
+    scale_x_discrete(labels = scenario_power_x_labels, drop = FALSE) +
+    scale_fill_manual(values = secele_color, labels = secele_legend, name = "") +
+    facet_wrap(~Region, ncol = 6, scales = "free_y", drop = FALSE) +
+    guides(fill = guide_legend(reverse = FALSE)) +
+    labs(
+      y = expression(paste("Power generation (EJ ", {yr^-1}, ")")),
+      title = paste0("Power generation in 2050 scenario comparison (", case_name, ")")
+    ) +
+    MyTheme +
+    theme(
+      title = element_text(size = 10),
+      legend.position = "bottom",
+      legend.text = element_text(size = 10),
+      legend.title = element_blank(),
+      strip.text = element_text(size = 8),
+      axis.text.x = element_text(size = 5.5, angle = 45, vjust = 0.9, hjust = 1)
+    )
+
+  save_png(
+    plot = p,
+    filename = file.path(
+      scenario_analysis_dir,
+      "plot_power",
+      "scenario_analysis_power_generation_2050_global_softlink_31reg_world.png"
+    ),
+    width = 300,
+    height = 300
+  )
+
+  model_grouped_power_x_levels <- c(
+    "AIM-Technology | 300C",
+    "AIM-Technology | 300C-LimCCS",
+    "AIM-Technology | 300C-LimCCS_bio",
+    "PSM-12DAY | 300C",
+    "PSM-12DAY | 300C-LimCCS",
+    "PSM-12DAY | 300C-LimCCS_bio"
+  )
+  model_grouped_power_x_labels <- c(
+    "AIM\n300C",
+    "AIM\n300C-LimCCS",
+    "AIM\n300C-LimCCS_bio",
+    "PSM\n300C",
+    "PSM\n300C-LimCCS",
+    "PSM\n300C-LimCCS_bio"
+  )
+  names(model_grouped_power_x_labels) <- model_grouped_power_x_levels
+
+  df_secele_model_grouped <- df_secele_scenario %>%
+    mutate(
+      ModelScenarioGrouped = factor(paste(Model, Scenario, sep = " | "), levels = model_grouped_power_x_levels)
+    )
+
+  p_model_grouped <- df_secele_model_grouped %>%
+    ggplot() +
+    geom_bar(aes(x = ModelScenarioGrouped, y = Value, fill = Variable), stat = "identity", width = 0.82) +
+    scale_x_discrete(labels = model_grouped_power_x_labels, drop = FALSE) +
+    scale_fill_manual(values = secele_color, labels = secele_legend, name = "") +
+    facet_wrap(~Region, ncol = 6, scales = "free_y", drop = FALSE) +
+    guides(fill = guide_legend(reverse = FALSE)) +
+    labs(
+      y = expression(paste("Power generation (EJ ", {yr^-1}, ")")),
+      title = paste0("Power generation in 2050 model-grouped scenario comparison (", case_name, ")")
+    ) +
+    MyTheme +
+    theme(
+      title = element_text(size = 10),
+      legend.position = "bottom",
+      legend.text = element_text(size = 10),
+      legend.title = element_blank(),
+      strip.text = element_text(size = 8),
+      axis.text.x = element_text(size = 5.5, angle = 45, vjust = 0.9, hjust = 1)
+    )
+
+  save_png(
+    plot = p_model_grouped,
+    filename = file.path(
+      scenario_analysis_dir,
+      "plot_power",
+      "scenario_analysis_power_generation_2050_model_grouped_global_softlink_31reg_world.png"
+    ),
+    width = 300,
+    height = 300
+  )
+}

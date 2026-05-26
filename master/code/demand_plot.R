@@ -23,23 +23,17 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink"
 region <- "global"
-date <- "2605131516"
+date <- "2605251345"
 plot_year <- 2050
-scenarios <- c("300C-LimCCS_bio", "300C-LimCCS", "300C", "Baseline")
+scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio")
 target_vars <- c("Sec_Ene_Hyd", "Sec_Ene_Hyd_Amm", "Sec_Ene_Ele_Tra_Los_Tra")
 generation_var <- "Sec_Ene_Ele"
 read_vars <- unique(c(target_vars, generation_var))
 
-softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
-  "."
-} else {
-  "softlink"
-}
-
 main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
 gdx_path <- file.path(main_dir, "merged_output.gdx")
-base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
-data_dir <- file.path(softlink_dir, "data")
+base_dir <- file.path("output", "global_260525")
+data_dir <- "C://AIMPSY_plot/master/data"
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 
 build_region_map <- function() {
@@ -290,7 +284,7 @@ for (scenario_name in scenarios) {
 # Demand maps with combined transport networks --------------------------------
 
 prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_primary")
-data_dir <- file.path(softlink_dir, "data")
+data_dir <- "data"
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson"
 
@@ -305,7 +299,8 @@ flow_specs <- tribble(
 overlay_specs <- tribble(
   ~Carrier, ~DemandVariable,      ~TitleLabel, ~LinkPattern,                         ~NodeSuffix,
   "H2",     "Sec_Ene_Hyd",        "H2",        ".*-H2_.*-H2$",                       "-H2",
-  "NH3",    "Sec_Ene_Hyd_Amm",    "NH3",       "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$", NA_character_
+  "NH3",    "Sec_Ene_Hyd_Amm",    "NH3",       "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$", NA_character_,
+  "BMS",    "Fin_Ene_Bio",        "BMS",       "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$", NA_character_
 )
 
 read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
@@ -337,8 +332,11 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
     ))
   }
 
-  if (overlay_spec$Carrier == "NH3") {
-    link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3_R31-([A-Z0-9]+)-NH3$")
+  if (overlay_spec$Carrier %in% c("NH3", "BMS")) {
+    link_nodes <- str_match(
+      df_link$L,
+      paste0("^R31-([A-Z0-9]+)-", overlay_spec$Carrier, "_R31-([A-Z0-9]+)-", overlay_spec$Carrier, "$")
+    )
 
     df_link <- df_link %>%
       mutate(
@@ -403,6 +401,8 @@ plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, ove
 
   fill_colors <- if (overlay_spec$DemandVariable == "Sec_Ene_Hyd_Amm") {
     c(low = "#fbf7ff", high = "#54278f")
+  } else if (overlay_spec$DemandVariable == "Fin_Ene_Bio") {
+    c(low = "#f7fcf5", high = "#238b45")
   } else {
     c(low = "#f7fbff", high = "#08306b")
   }
@@ -418,8 +418,24 @@ plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, ove
   edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
   edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
 
-  ggplot() +
-    geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
+  p <- ggplot()
+
+  if (overlay_spec$Carrier == "BMS") {
+    p <- p +
+      geom_sf(data = region_boundaries, fill = NA, color = "grey45", linewidth = 0.35)
+  } else {
+    p <- p +
+      geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
+      scale_fill_gradient(
+        low = fill_colors[["low"]],
+        high = fill_colors[["high"]],
+        na.value = "grey92",
+        labels = scales::label_number(accuracy = 0.01),
+        name = "Demand (EJ/yr)"
+      )
+  }
+
+  p +
     geom_segment(
       data = edges_line_df,
       aes(x = x0, y = y0, xend = x1, yend = y1),
@@ -452,13 +468,6 @@ plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, ove
       lineend = "round",
       arrow = arrow(length = unit(1.45, "mm"), type = "closed")
     ) +
-    scale_fill_gradient(
-      low = fill_colors[["low"]],
-      high = fill_colors[["high"]],
-      na.value = "grey92",
-      labels = scales::label_number(accuracy = 0.01),
-      name = "Demand (EJ/yr)"
-    ) +
     scale_linewidth_continuous(
       range = c(0.25, 1.45),
       breaks = log10(1 + brks),
@@ -488,7 +497,7 @@ plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, ove
       plot.title = element_text(hjust = 0.5, size = 12)
     ) +
     guides(
-      fill = guide_colorbar(
+      fill = if (overlay_spec$Carrier == "BMS") "none" else guide_colorbar(
         direction = "horizontal",
         title.position = "top",
         title.hjust = 0.5,
@@ -509,7 +518,7 @@ plot_demand_transport_overlay <- function(map_data, edges_sf, scenario_name, ove
         scenario_name,
         " ",
         overlay_spec$TitleLabel,
-        " demand and combined transport flow (",
+        ifelse(overlay_spec$Carrier == "BMS", " combined transport flow (", " demand and combined transport flow ("),
         plot_year,
         ")"
       )
@@ -541,7 +550,7 @@ nh3_nodes_tbl <- read.csv(nh3_node_csv, stringsAsFactors = FALSE) %>%
 
 for (i in seq_len(nrow(overlay_specs))) {
   overlay_spec <- overlay_specs[i, ]
-  nodes_tbl <- if (overlay_spec$Carrier == "NH3") nh3_nodes_tbl else h2_nodes_tbl
+  nodes_tbl <- if (overlay_spec$Carrier %in% c("NH3", "BMS")) nh3_nodes_tbl else h2_nodes_tbl
 
   for (scenario_name in scenarios) {
     overlay_dir <- file.path(base_dir, scenario_name, "plot_demand_map", "demand_transport_overlay")

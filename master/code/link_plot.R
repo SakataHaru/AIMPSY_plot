@@ -29,14 +29,9 @@ plot_year <- 2050
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 
-softlink_dir <- if (basename(normalizePath(getwd(), winslash = "/", mustWork = FALSE)) == "softlink") {
-  "."
-} else {
-  "softlink"
-}
-data_dir <- file.path(softlink_dir, "data")
+data_dir <- "data"
 nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
-base_dir <- file.path(softlink_dir, "output", "global_softlink", "global_compare")
+base_dir <- file.path("output", "global_260525")
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link",   "AC",     "AC",            "plasma",
