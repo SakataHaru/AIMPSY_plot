@@ -1,0 +1,4 @@
+{
+    "workbench.keybindings.rstudioKeybindings": true,
+    "positron.r.pipe": "%>%"
+}
