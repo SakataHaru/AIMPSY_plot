@@ -30,11 +30,10 @@ ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 
 data_dir <- "data"
-nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 base_dir <- file.path("output", "global_260525")
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
-  "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link",   "AC",     "AC",            "plasma",
+  "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link_ele","AC",    "AC",            "plasma",
   "H2",      ".*-H2_.*-H2$",    "-H2",       "plot_link_h2","H2",     "H2 pipeline",   "viridis"
 )
 
@@ -177,18 +176,33 @@ build_region_boundaries <- function() {
 
 region_boundaries <- build_region_boundaries()
 
-node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/nodes_centroid.geojson"
-if (!file.exists(node_path)) {
-  stop("Missing node coordinate file: ", node_path)
+node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
+node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
+
+if (file.exists(node_path)) {
+  nodes_tbl <- st_read(node_path, quiet = TRUE) %>%
+    st_drop_geometry() %>%
+    transmute(
+      N_PSY = as.character(N_PSY),
+      lon = as.numeric(centroid_x),
+      lat = as.numeric(centroid_y)
+    )
+} else if (file.exists(node_csv)) {
+  nodes_tbl <- read.csv(node_csv, stringsAsFactors = FALSE) %>%
+    transmute(
+      N_PSY = str_remove(as.character(N_PSY), "^R31-"),
+      lon = as.numeric(lon),
+      lat = as.numeric(lat)
+    )
+} else {
+  stop("Missing node coordinate file: ", node_path, " or ", node_csv)
 }
 
-nodes_tbl <- st_read(node_path, quiet = TRUE) %>%
-  st_drop_geometry() %>%
-  transmute(
-    N_PSY,
-    lon = as.numeric(centroid_x),
-    lat = as.numeric(centroid_y)
-  )
+normalize_link_node <- function(node_name, node_suffix) {
+  node_name %>%
+    str_remove_all(fixed(node_suffix)) %>%
+    str_remove("^R31-")
+}
 
 read_link_value <- function(scenario_name, link_pattern, node_suffix, value_spec) {
   gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -220,8 +234,8 @@ read_link_value <- function(scenario_name, link_pattern, node_suffix, value_spec
     mutate(
       Scenario = scenario_name,
       Symbol = value_symbol,
-      N0 = str_remove_all(N0, fixed(node_suffix)),
-      N1 = str_remove_all(N1, fixed(node_suffix))
+      N0 = normalize_link_node(N0, node_suffix),
+      N1 = normalize_link_node(N1, node_suffix)
     ) %>%
     mutate(
       N0_plot = if (direction == "backward") N1 else N0,
@@ -513,178 +527,257 @@ walk(seq_len(nrow(link_types)), function(i) {
   }
 })
 
-# NH3 trade flow plots --------------------------------------------------------
+# Demand maps and link overlays ----------------------------------------------
 
-nh3_plot_threshold <- 1
+main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
+merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
+link_demand_specs <- tribble(
+  ~LinkType, ~Folder,          ~DemandVariable, ~DemandLabel,          ~FillLow,   ~FillHigh,
+  "AC",      "plot_link_ele",  "Sec_Ene_Ele",   "Electricity supply",  "#f7fbff", "#08306b",
+  "H2",      "plot_link_h2",   "Sec_Ene_Hyd",   "Hydrogen demand",     "#f7fbff", "#08306b"
+)
 
-if (!file.exists(nh3_node_csv)) {
-  stop(
-    "Missing NH3 node coordinate CSV: ",
-    nh3_node_csv,
-    ". Run code/worldmap_plot.R first."
-  )
-}
-
-nh3_nodes_tbl <- read.csv(nh3_node_csv, stringsAsFactors = FALSE) %>%
-  transmute(N_PSY, lon = as.numeric(lon), lat = as.numeric(lat))
-
-read_nh3_trade_value <- function(scenario_name, value_spec) {
-  gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
+read_demand_values <- function(gdx_path, variables) {
   if (!file.exists(gdx_path)) {
     stop("Missing GDX file: ", gdx_path)
   }
 
-  value_symbol <- value_spec$Symbol
-  direction <- value_spec$Direction
-
-  df_raw <- rgdx.param(gdx_path, value_symbol) %>%
-    mutate(across(where(is.factor), as.character)) %>%
-    filter(str_detect(L, "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$"))
-
-  df_link <- df_raw %>%
-    group_by(L) %>%
-    summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
-    filter(Value > nh3_plot_threshold)
-
-  if (nrow(df_link) == 0) {
-    return(tibble(
-      L = character(),
-      Value = numeric(),
-      Scenario = character(),
-      Symbol = character(),
-      N0 = character(),
-      N1 = character()
-    ))
-  }
-
-  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3_R31-([A-Z0-9]+)-NH3$")
-
-  df_link %>%
-    mutate(
-      Scenario = scenario_name,
-      Symbol = value_symbol,
-      N0 = link_nodes[, 2],
-      N1 = link_nodes[, 3]
+  rgdx.param(gdx_path, "iamc_gdx") %>%
+    transmute(
+      Scenario = as.character(Sc),
+      Region = str_remove(as.character(Sr), "^R31-"),
+      Variable = as.character(Sv),
+      Year = as.numeric(as.character(Y5)),
+      Value = suppressWarnings(as.numeric(as.character(iamc_gdx)))
     ) %>%
-    mutate(
-      N0_plot = if (direction == "backward") N1 else N0,
-      N1_plot = if (direction == "backward") N0 else N1,
-      N0 = N0_plot,
-      N1 = N1_plot
+    filter(
+      Scenario %in% scenarios,
+      Region %in% region_boundaries$region,
+      Variable %in% variables,
+      Year == plot_year,
+      !is.na(Value)
     ) %>%
-    select(-N0_plot, -N1_plot)
+    group_by(Scenario, Region, Variable, Year) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
 }
 
-make_nh3_trade_edges_sf <- function(df_link) {
-  missing_nodes <- setdiff(unique(c(df_link$N0, df_link$N1)), nh3_nodes_tbl$N_PSY)
-  if (length(missing_nodes) > 0) {
-    stop("Missing NH3 node coordinates: ", paste(missing_nodes, collapse = ", "))
-  }
+link_demand_values <- read_demand_values(merged_gdx_path, link_demand_specs$DemandVariable)
 
-  edges <- df_link %>%
-    inner_join(nh3_nodes_tbl, by = c("N0" = "N_PSY")) %>%
-    rename(x0 = lon, y0 = lat) %>%
-    inner_join(nh3_nodes_tbl, by = c("N1" = "N_PSY")) %>%
-    rename(x1 = lon, y1 = lat) %>%
-    filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1)) %>%
-    filter(Value > nh3_plot_threshold)
+plot_link_demand_map <- function(map_data, scenario_name, demand_spec) {
+  plot_data <- map_data %>%
+    filter(Scenario == scenario_name, Variable == demand_spec$DemandVariable)
 
-  if (nrow(edges) == 0) {
-    return(st_sf(edges, geometry = st_sfc(crs = 4326)))
-  }
-
-  lines_sfc <- pmap(
-    edges[, c("x0", "y0", "x1", "y1")],
-    ~ st_linestring(matrix(c(..1, ..2, ..3, ..4), ncol = 2, byrow = TRUE))
-  )
-
-  st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+  ggplot(plot_data) +
+    geom_sf(aes(fill = Value), color = "grey35", linewidth = 0.3) +
+    scale_fill_gradient(
+      low = demand_spec$FillLow,
+      high = demand_spec$FillHigh,
+      na.value = "grey92",
+      labels = scales::label_number(accuracy = 0.01),
+      name = "EJ/yr"
+    ) +
+    coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
+    theme_void() +
+    theme(
+      legend.position = c(0.08, 0.42),
+      legend.direction = "vertical",
+      legend.background = element_rect(fill = "white", color = "grey85"),
+      legend.key.width = unit(8, "mm"),
+      legend.key.height = unit(18, "mm"),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) +
+    labs(title = paste0(scenario_name, " ", demand_spec$DemandLabel, " by R31 region (", plot_year, ")"))
 }
 
-nh3_value_specs <- value_specs %>%
-  filter(Symbol %in% c("vff_l", "vfb_l"))
+plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spec, demand_spec) {
+  if (nrow(edges_sf) == 0) {
+    warning("No plottable overlay links for scenario: ", scenario_name, " / ", link_spec$LinkType)
+    return(NULL)
+  }
 
-walk(seq_len(nrow(nh3_value_specs)), function(j) {
-  value_spec <- nh3_value_specs[j, ]
+  plot_data <- map_data %>%
+    filter(Scenario == scenario_name, Variable == demand_spec$DemandVariable)
+
+  vmax <- max(edges_sf$Value, na.rm = TRUE)
+  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
+  brks <- brks[brks <= vmax]
+  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+
+  edges_plot_df <- edges_sf %>%
+    mutate(Value_plot = log10(1 + Value)) %>%
+    st_drop_geometry()
+  edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
+  edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
+
+  ggplot() +
+    geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
+    geom_segment(
+      data = edges_line_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1),
+      color = "white",
+      linewidth = 0.9,
+      alpha = 0.75,
+      lineend = "round",
+      show.legend = FALSE
+    ) +
+    geom_segment(
+      data = edges_arrow_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1),
+      color = "white",
+      linewidth = 0.9,
+      alpha = 0.75,
+      lineend = "round",
+      arrow = arrow(length = unit(1.55, "mm"), type = "closed"),
+      show.legend = FALSE
+    ) +
+    geom_segment(
+      data = edges_line_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
+      alpha = 0.82,
+      lineend = "round"
+    ) +
+    geom_segment(
+      data = edges_arrow_df,
+      aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
+      alpha = 0.82,
+      lineend = "round",
+      arrow = arrow(length = unit(1.45, "mm"), type = "closed")
+    ) +
+    scale_fill_gradient(
+      low = demand_spec$FillLow,
+      high = demand_spec$FillHigh,
+      na.value = "grey92",
+      labels = scales::label_number(accuracy = 0.01),
+      name = "Demand (EJ/yr)"
+    ) +
+    scale_linewidth_continuous(
+      range = c(0.25, 1.45),
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 1)(brks),
+      name = "vff_l / vfb_l annual flow (GWh/yr)"
+    ) +
+    scale_color_gradient(
+      low = "#ffd34d",
+      high = "#b2182b",
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 1)(brks),
+      name = "vff_l / vfb_l annual flow (GWh/yr)"
+    ) +
+    coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.box = "horizontal",
+      legend.box.spacing = unit(4, "mm"),
+      legend.margin = margin(t = 0, r = 1, b = 0, l = 1, unit = "mm"),
+      legend.background = element_blank(),
+      legend.key.width = unit(16, "mm"),
+      legend.key.height = unit(3, "mm"),
+      legend.title = element_text(size = 7),
+      legend.text = element_text(size = 6.5),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) +
+    guides(
+      fill = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        barwidth = unit(48, "mm"),
+        barheight = unit(3, "mm")
+      ),
+      color = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        barwidth = unit(48, "mm"),
+        barheight = unit(3, "mm")
+      ),
+      linewidth = "none"
+    ) +
+    labs(
+      title = paste0(
+        scenario_name,
+        " ",
+        demand_spec$DemandLabel,
+        " and ",
+        link_spec$TitleLabel,
+        " combined transport flow (",
+        plot_year,
+        ")"
+      )
+    )
+}
+
+link_demand_map_data <- region_boundaries %>%
+  left_join(link_demand_values, by = c("region" = "Region"))
+
+link_flow_specs <- value_specs %>% filter(Symbol %in% c("vff_l", "vfb_l"))
+
+for (i in seq_len(nrow(link_types))) {
+  link_spec <- link_types[i, ]
+  demand_spec <- link_demand_specs %>% filter(LinkType == link_spec$LinkType)
 
   for (scenario_name in scenarios) {
-    plot_dir <- file.path(base_dir, scenario_name, "plot_trade_nh3", value_spec$Symbol)
-    dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
+    demand_dir <- file.path(base_dir, scenario_name, link_spec$Folder, "demand_map")
+    overlay_dir <- file.path(base_dir, scenario_name, link_spec$Folder, "demand_link_overlay")
+    dir.create(demand_dir, recursive = TRUE, showWarnings = FALSE)
+    dir.create(overlay_dir, recursive = TRUE, showWarnings = FALSE)
 
-    edges_sf <- read_nh3_trade_value(
-      scenario_name = scenario_name,
-      value_spec = value_spec
-    ) %>%
-      make_nh3_trade_edges_sf()
-
-    p <- plot_transmission(
-      edges_sf = edges_sf,
-      scenario_name = scenario_name,
-      title_label = "NH3 trade",
-      palette = "magma",
-      value_spec = value_spec
-    )
-    if (is.null(p)) next
-
+    p_demand <- plot_link_demand_map(link_demand_map_data, scenario_name, demand_spec)
     ggsave(
       filename = file.path(
-        plot_dir,
-        paste0(
-          "global_",
-          scenario_name,
-          "_",
-          value_spec$FileTag,
-          "_NH3_trade_",
-          plot_year,
-          ".png"
-        )
+        demand_dir,
+        paste0("global_", scenario_name, "_", demand_spec$DemandVariable, "_demand_map_", plot_year, ".png")
       ),
-      plot = p,
+      plot = p_demand,
       width = 300,
       height = 130,
       units = "mm",
       dpi = 300,
       bg = "white"
     )
-  }
-})
 
-for (scenario_name in scenarios) {
-  nh3_combined_dir <- file.path(base_dir, scenario_name, "plot_trade_nh3", "vff_l_vfb_l_combined")
-  dir.create(nh3_combined_dir, recursive = TRUE, showWarnings = FALSE)
-
-  edges_combined_sf <- map_dfr(seq_len(nrow(nh3_value_specs)), function(j) {
-    read_nh3_trade_value(
-      scenario_name = scenario_name,
-      value_spec = nh3_value_specs[j, ]
-    )
-  }) %>%
-    make_nh3_trade_edges_sf()
-
-  p <- plot_combined_flow(
-    edges_sf = edges_combined_sf,
-    scenario_name = scenario_name,
-    title_label = "NH3 trade",
-    palette = "magma"
-  )
-  if (is.null(p)) next
-
-  ggsave(
-    filename = file.path(
-      nh3_combined_dir,
-      paste0(
-        "global_",
-        scenario_name,
-        "_vff_l_vfb_l_combined_NH3_trade_",
-        plot_year,
-        ".png"
+    edges_combined_sf <- map_dfr(seq_len(nrow(link_flow_specs)), function(j) {
+      read_link_value(
+        scenario_name = scenario_name,
+        link_pattern = link_spec$Pattern,
+        node_suffix = link_spec$NodeSuffix,
+        value_spec = link_flow_specs[j, ]
       )
-    ),
-    plot = p,
-    width = 300,
-    height = 130,
-    units = "mm",
-    dpi = 300,
-    bg = "white"
-  )
+    }) %>%
+      make_edges_sf()
+
+    p_overlay <- plot_link_demand_overlay(
+      map_data = link_demand_map_data,
+      edges_sf = edges_combined_sf,
+      scenario_name = scenario_name,
+      link_spec = link_spec,
+      demand_spec = demand_spec
+    )
+    if (is.null(p_overlay)) next
+
+    ggsave(
+      filename = file.path(
+        overlay_dir,
+        paste0(
+          "global_",
+          scenario_name,
+          "_",
+          demand_spec$DemandVariable,
+          "_vff_l_vfb_l_combined_",
+          link_spec$FileTag,
+          "_demand_link_overlay_",
+          plot_year,
+          ".png"
+        )
+      ),
+      plot = p_overlay,
+      width = 300,
+      height = 150,
+      units = "mm",
+      dpi = 300,
+      bg = "white"
+    )
+  }
 }
