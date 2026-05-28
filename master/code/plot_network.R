@@ -253,6 +253,21 @@ build_h2_demand_map_data <- function(demand_values) {
     st_as_sf(crs = st_crs(region_boundaries))
 }
 
+fixed_fill_limits <- function(values) {
+  vmax <- max(values, na.rm = TRUE)
+  if (!is.finite(vmax) || vmax <= 0) return(NULL)
+  c(0, vmax)
+}
+
+log_value_breaks <- function(values) {
+  vmax <- max(values, na.rm = TRUE)
+  if (!is.finite(vmax) || vmax <= 0) return(1)
+  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
+  brks <- brks[brks <= vmax]
+  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks
+}
+
 normalize_longitude <- function(x) {
   ((x + 180) %% 360) - 180
 }
@@ -386,35 +401,15 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
     ) } %>%
     distinct(N_PSY, lon, lat)
 
-  max_value <- max(c(h2_edges_sf$Value, nh3_edges_sf$Value), na.rm = TRUE)
-  brks <- 10^seq(0, ceiling(log10(max_value)), by = 1)
-  brks <- brks[brks <= max_value]
-  if (length(brks) == 0) brks <- pretty(c(0, max_value), n = 4)
+  brks <- log_value_breaks(c(h2_edges_sf$Value, nh3_edges_sf$Value))
+  nh3_brks <- log_value_breaks(nh3_edges_sf$Value)
 
   plot_map_data <- h2_demand_map %>%
     filter(Scenario == scenario_name)
+  fill_limits <- fixed_fill_limits(h2_demand_map$Value)
 
   ggplot() +
     geom_sf(data = plot_map_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
-    geom_segment(
-      data = h2_line_df,
-      aes(x = x0, y = y0, xend = x1, yend = y1),
-      color = "white",
-      linewidth = 0.95,
-      alpha = 0.72,
-      lineend = "round",
-      show.legend = FALSE
-    ) +
-    geom_segment(
-      data = h2_arrow_df,
-      aes(x = x0, y = y0, xend = x1, yend = y1),
-      color = "white",
-      linewidth = 0.95,
-      alpha = 0.72,
-      lineend = "round",
-      arrow = arrow(length = unit(1.65, "mm"), type = "closed"),
-      show.legend = FALSE
-    ) +
     geom_segment(
       data = h2_line_df,
       aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot),
@@ -441,8 +436,7 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
     ) +
     geom_path(
       data = nh3_route_df,
-      aes(x = x, y = y, group = segment_id, linewidth = Value_plot),
-      color = nh3_color,
+      aes(x = x, y = y, group = segment_id, linewidth = Value_plot, color = Value_plot),
       alpha = 0.84,
       lineend = "round"
     ) +
@@ -458,8 +452,7 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
     ) +
     geom_segment(
       data = nh3_arrow_df,
-      aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot),
-      color = nh3_color,
+      aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot, color = Value_plot),
       alpha = 0.88,
       lineend = "round",
       arrow = arrow(length = unit(1.95, "mm"), type = "closed")
@@ -478,6 +471,7 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
     scale_fill_gradient(
       low = "#f7f7f7",
       high = "#252525",
+      limits = fill_limits,
       na.value = "grey92",
       labels = scales::label_number(accuracy = 0.01),
       name = "Hydrogen demand (EJ/yr)"
@@ -487,6 +481,13 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
       breaks = log10(1 + brks),
       labels = scales::label_number(accuracy = 1)(brks),
       name = "Network flow (GWh/yr)"
+    ) +
+    scale_color_gradient(
+      low = "#e0ecf4",
+      high = "#4a1486",
+      breaks = log10(1 + nh3_brks),
+      labels = scales::label_number(accuracy = 1)(nh3_brks),
+      name = "NH3 sea trade (GWh/yr)"
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +
@@ -515,6 +516,13 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
         direction = "horizontal",
         title.position = "top",
         title.hjust = 0.5
+      ),
+      color = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        barwidth = unit(48, "mm"),
+        barheight = unit(3, "mm")
       )
     ) +
     labs(

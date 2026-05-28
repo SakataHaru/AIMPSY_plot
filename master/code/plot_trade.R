@@ -190,6 +190,12 @@ build_trade_map_data <- function(region_boundaries, trade_map_values, map_specs)
     st_as_sf(crs = st_crs(region_boundaries))
 }
 
+fixed_fill_limits <- function(values) {
+  vmax <- max(values, na.rm = TRUE)
+  if (!is.finite(vmax) || vmax <= 0) return(NULL)
+  c(0, vmax)
+}
+
 read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   flow_gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
   if (!file.exists(flow_gdx_path)) {
@@ -512,12 +518,17 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NU
   if (!is.null(map_data) && !is.null(map_spec)) {
     plot_map_data <- map_data %>%
       filter(Scenario == scenario_name, Carrier == overlay_spec$Carrier)
+    fill_limits <- map_data %>%
+      filter(Carrier == overlay_spec$Carrier) %>%
+      pull(Value) %>%
+      fixed_fill_limits()
 
     p <- p +
       geom_sf(data = plot_map_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
       scale_fill_gradient(
         low = map_spec$FillLow,
         high = map_spec$FillHigh,
+        limits = fill_limits,
         na.value = "grey92",
         labels = scales::label_number(accuracy = 0.01),
         name = map_spec$LegendTitle

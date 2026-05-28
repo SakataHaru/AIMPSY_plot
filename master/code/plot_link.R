@@ -571,15 +571,26 @@ read_demand_values <- function(gdx_path, variables) {
 
 link_demand_values <- read_demand_values(merged_gdx_path, link_demand_specs$DemandVariable)
 
+fixed_fill_limits <- function(values) {
+  vmax <- max(values, na.rm = TRUE)
+  if (!is.finite(vmax) || vmax <= 0) return(NULL)
+  c(0, vmax)
+}
+
 plot_link_demand_map <- function(map_data, scenario_name, demand_spec) {
   plot_data <- map_data %>%
     filter(Scenario == scenario_name, Variable == demand_spec$DemandVariable)
+  fill_limits <- map_data %>%
+    filter(Variable == demand_spec$DemandVariable) %>%
+    pull(Value) %>%
+    fixed_fill_limits()
 
   ggplot(plot_data) +
     geom_sf(aes(fill = Value), color = "grey35", linewidth = 0.3) +
     scale_fill_gradient(
       low = demand_spec$FillLow,
       high = demand_spec$FillHigh,
+      limits = fill_limits,
       na.value = "grey92",
       labels = scales::label_number(accuracy = 0.01),
       name = "EJ/yr"
@@ -605,6 +616,10 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
 
   plot_data <- map_data %>%
     filter(Scenario == scenario_name, Variable == demand_spec$DemandVariable)
+  fill_limits <- map_data %>%
+    filter(Variable == demand_spec$DemandVariable) %>%
+    pull(Value) %>%
+    fixed_fill_limits()
 
   vmax <- max(edges_sf$Value, na.rm = TRUE)
   brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
@@ -635,6 +650,7 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
     scale_fill_gradient(
       low = demand_spec$FillLow,
       high = demand_spec$FillHigh,
+      limits = fill_limits,
       na.value = "grey92",
       labels = scales::label_number(accuracy = 0.01),
       name = "Demand (EJ/yr)"

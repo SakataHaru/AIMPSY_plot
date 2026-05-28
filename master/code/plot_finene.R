@@ -10,10 +10,10 @@ source(file.path("code", "dataframe.R"))
 
 case_name <- "AIM-Technology final energy demand scenario comparison"
 
-energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605111701/main"
-target_scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio")
+energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605262045/main"
+target_scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
 plot_year <- 2050
-base_dir <- file.path("output", "global_260525")
+base_dir <- file.path("output", "global_260527")
 out_dir <- file.path(base_dir, "scenario_anarysis", "plot_finene")
 
 region_list <- c(
