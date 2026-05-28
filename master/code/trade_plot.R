@@ -28,8 +28,6 @@ plot_year <- 2050
 scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio")
 
 base_dir <- file.path("output", "global_260525")
-data_dir <- "data"
-nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 
 build_region_map <- function() {
   tribble(
@@ -110,13 +108,11 @@ region_boundaries <- build_region_boundaries()
 # Maritime trade links --------------------------------------------------------
 
 prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_primary")
-data_dir <- "data"
-nh3_node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
-trade_port_csv <- file.path(data_dir, "AIM_R31_representative_trade_ports.csv")
-nv_dist_csv <- Sys.getenv(
-  "AIMPSY_NV_DIST_CSV",
-  unset = "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/AIMPSY-master/data/PowerSystemData/global/nv_dist.csv"
-)
+main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
+merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
+searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
+searoute_path <- file.path(searoute_dir, "searoute.geojson")
+searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
 arrow_threshold <- 10
 
 flow_specs <- tribble(
@@ -126,10 +122,73 @@ flow_specs <- tribble(
 )
 
 overlay_specs <- tribble(
-  ~Carrier, ~Folder,           ~TitleLabel,    ~LinkPattern,
-  "NH3",    "plot_trade_nh3",  "NH3 trade",   "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",
-  "BMS",    "plot_trade_bio",  "Biomass trade","^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$"
+  ~Carrier, ~Folder,           ~TitleLabel,     ~LinkPattern,                                  ~FlowLow,  ~FlowHigh,
+  "NH3",    "plot_trade_nh3",  "NH3 trade",    "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",       "#f1b6da", "#c51b7d",
+  "BMS",    "plot_trade_bio",  "Biomass trade", "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$",      "#b2e2e2", "#006d77"
 )
+
+trade_map_specs <- tibble(
+  Carrier = c("NH3", "BMS"),
+  DemandVariables = list(
+    "Sec_Ene_Hyd_Amm",
+    c("Sec_Ene_Ele_Bio_wo_CCS", "Sec_Ene_Ele_Bio_w_CCS")
+  ),
+  MapLabel = c(
+    "Ammonia demand",
+    "Biomass power generation"
+  ),
+  LegendTitle = c(
+    "Ammonia demand (EJ/yr)",
+    "Biomass power generation (EJ/yr)"
+  ),
+  FillLow = c("#fbf7ff", "#f7fcf5"),
+  FillHigh = c("#54278f", "#006d2c")
+)
+
+read_trade_map_values <- function(gdx_path, map_specs) {
+  if (!file.exists(gdx_path)) {
+    stop("Missing GDX file: ", gdx_path)
+  }
+
+  variable_map <- map_specs %>%
+    select(Carrier, DemandVariables) %>%
+    unnest(DemandVariables) %>%
+    rename(Variable = DemandVariables)
+
+  rgdx.param(gdx_path, "iamc_gdx") %>%
+    transmute(
+      Scenario = as.character(Sc),
+      Region = str_remove(as.character(Sr), "^R31-"),
+      Variable = as.character(Sv),
+      Year = as.numeric(as.character(Y5)),
+      Value = suppressWarnings(as.numeric(as.character(iamc_gdx)))
+    ) %>%
+    inner_join(variable_map, by = "Variable") %>%
+    filter(
+      Scenario %in% scenarios,
+      Region %in% region_boundaries$region,
+      Year == plot_year,
+      !is.na(Value)
+    ) %>%
+    group_by(Scenario, Region, Carrier, Year) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+}
+
+build_trade_map_data <- function(region_boundaries, trade_map_values, map_specs) {
+  map_index <- tidyr::expand_grid(
+    Scenario = scenarios,
+    Carrier = map_specs$Carrier,
+    region = region_boundaries$region
+  ) %>%
+    left_join(
+      trade_map_values,
+      by = c("Scenario", "Carrier", "region" = "Region")
+    )
+
+  map_index %>%
+    left_join(region_boundaries %>% select(region, geometry), by = "region") %>%
+    st_as_sf(crs = st_crs(region_boundaries))
+}
 
 read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   flow_gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -183,29 +242,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
     select(-N0_plot, -N1_plot)
 }
 
-load_navigation_distances <- function(dist_csv) {
-  if (!file.exists(dist_csv)) {
-    warning("Navigation distance CSV not found: ", dist_csv)
-    return(tibble(N0 = character(), N1 = character(), NavigationDistanceKm = numeric()))
-  }
-
-  dist_raw <- read.csv(dist_csv, check.names = FALSE, stringsAsFactors = FALSE)
-  names(dist_raw)[[1]] <- "N0_raw"
-
-  dist_raw %>%
-    pivot_longer(
-      cols = -N0_raw,
-      names_to = "N1_raw",
-      values_to = "NavigationDistanceKm"
-    ) %>%
-    transmute(
-      N0 = str_remove(as.character(N0_raw), "^R31-"),
-      N1 = str_remove(as.character(N1_raw), "^R31-"),
-      NavigationDistanceKm = as.numeric(NavigationDistanceKm)
-    )
-}
-
-make_transport_edges_sf <- function(df_link, nodes_tbl, navigation_distances = NULL) {
+make_transport_edges_sf <- function(df_link, nodes_tbl, sea_routes_sf) {
   missing_nodes <- setdiff(unique(c(df_link$N0, df_link$N1)), nodes_tbl$N_PSY)
   if (length(missing_nodes) > 0) {
     stop("Missing transport node coordinates: ", paste(missing_nodes, collapse = ", "))
@@ -219,253 +256,234 @@ make_transport_edges_sf <- function(df_link, nodes_tbl, navigation_distances = N
     filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1)) %>%
     filter(Value > 0)
 
-  if (!is.null(navigation_distances) && nrow(navigation_distances) > 0) {
-    edges <- edges %>%
-      left_join(navigation_distances, by = c("N0", "N1"))
-  }
-
   if (nrow(edges) == 0) {
     return(st_sf(edges, geometry = st_sfc(crs = 4326)))
   }
 
-  lines_sfc <- pmap(
-    edges[, c("x0", "y0", "x1", "y1")],
-    ~ st_linestring(matrix(c(..1, ..2, ..3, ..4), ncol = 2, byrow = TRUE))
+  routes_tbl <- sea_routes_sf %>%
+    mutate(route_key = paste(N0, N1, sep = "__"))
+  edges <- edges %>%
+    mutate(route_key = paste(N0, N1, sep = "__"))
+
+  route_index <- match(edges$route_key, routes_tbl$route_key)
+  missing_routes <- edges$route_key[is.na(route_index)]
+  if (length(missing_routes) > 0) {
+    stop("Missing sea routes: ", paste(unique(missing_routes), collapse = ", "))
+  }
+
+  st_sf(
+    edges %>% select(-route_key),
+    geometry = st_geometry(routes_tbl)[route_index],
+    crs = st_crs(sea_routes_sf)
   )
-
-  st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
 }
 
-resolve_trade_port_csv <- function(port_csv) {
-  candidates <- unique(c(
-    port_csv,
-    file.path("master", "data", basename(port_csv)),
-    file.path("C:/AIMPSY_plot/master/data", basename(port_csv))
-  ))
+load_trade_nodes <- function(representative_path) {
+  if (!file.exists(representative_path)) {
+    stop("Missing sea-route representative node GeoJSON: ", representative_path)
+  }
 
-  existing <- candidates[file.exists(candidates)]
-  if (length(existing) == 0) return(NA_character_)
-  existing[[1]]
-}
-
-load_trade_nodes <- function(default_node_csv, port_csv) {
-  port_path <- resolve_trade_port_csv(port_csv)
-
-  if (!is.na(port_path)) {
-    return(
-      read.csv(port_path, stringsAsFactors = FALSE) %>%
-        transmute(
-          N_PSY,
-          lon = as.numeric(lon),
-          lat = as.numeric(lat)
-        )
+  st_read(representative_path, quiet = TRUE) %>%
+    st_drop_geometry() %>%
+    transmute(
+      N_PSY = str_remove(as.character(R31), "^R31-"),
+      lon = as.numeric(Longitude),
+      lat = as.numeric(Latitude)
     )
+}
+
+load_sea_routes <- function(route_path) {
+  if (!file.exists(route_path)) {
+    stop("Missing sea-route GeoJSON: ", route_path)
   }
 
-  warning(
-    "Representative trade port CSV not found: ",
-    port_csv,
-    ". Falling back to regional centroid nodes."
-  )
-
-  read.csv(default_node_csv, stringsAsFactors = FALSE) %>%
-    transmute(N_PSY, lon = as.numeric(lon), lat = as.numeric(lat))
+  st_read(route_path, quiet = TRUE) %>%
+    st_set_crs(4326) %>%
+    transmute(
+      N0 = str_remove(as.character(R31_from), "^R31-"),
+      N1 = str_remove(as.character(R31_to), "^R31-"),
+      length_km = as.numeric(length_km),
+      route_source = as.character(route_source),
+      geometry = geometry
+    )
 }
 
-route_region_class <- function(region_code) {
-  case_when(
-    region_code %in% c("USA", "CAN", "MEX") ~ "north_america",
-    region_code %in% c("BRA", "XLM") ~ "latin_america",
-    region_code %in% c("JPN", "KOR", "CHN", "XEA", "VNM", "THA", "MYS", "XSE", "IDN") ~ "east_asia",
-    region_code %in% c("IND", "XSA") ~ "south_asia",
-    region_code %in% c("AUS", "XOC") ~ "oceania",
-    region_code %in% c("XME") ~ "middle_east",
-    region_code %in% c("XAF", "ZAF", "XENI") ~ "africa",
-    region_code %in% c("XE15", "XE10", "XE3", "XEWI", "XEEI", "TUR", "XNF") ~ "europe",
-    region_code %in% c("RUS", "XCS") ~ "eurasia",
-    TRUE ~ "other"
-  )
+normalize_longitude <- function(x) {
+  ((x + 180) %% 360) - 180
 }
 
-route_hub <- function(name) {
-  switch(
-    name,
-    singapore = tibble(lon = 103.8, lat = 1.3),
-    suez = tibble(lon = 32.6, lat = 30.0),
-    gibraltar = tibble(lon = -5.4, lat = 36.0),
-    panama = tibble(lon = -79.9, lat = 9.0),
-    cape = tibble(lon = 18.4, lat = -34.3),
-    hormuz = tibble(lon = 56.3, lat = 26.6),
-    dateline_north_w = tibble(lon = 179.7, lat = 42.0),
-    dateline_north_e = tibble(lon = -179.7, lat = 42.0),
-    dateline_south_w = tibble(lon = 179.7, lat = -22.0),
-    dateline_south_e = tibble(lon = -179.7, lat = -22.0),
-    stop("Unknown route hub: ", name)
-  )
+route_coordinates_df <- function(edge_sf, route_id) {
+  coords <- st_coordinates(st_geometry(edge_sf))
+  coords_tbl <- as_tibble(coords) %>%
+    mutate(
+      route_id = route_id,
+      x = normalize_longitude(X),
+      y = Y,
+      part = if ("L1" %in% names(.)) L1 else 1L,
+      coord_order = row_number()
+    )
+
+  coords_tbl %>%
+    group_by(part) %>%
+    mutate(
+      dateline_part = cumsum(c(FALSE, abs(diff(x)) > 180)),
+      segment_id = paste(route_id, part, dateline_part, sep = "__")
+    ) %>%
+    ungroup()
 }
 
-uses_pacific_route <- function(class0, class1, n0, n1) {
-  pacific_americas <- c("north_america", "latin_america")
-  pacific_asia <- c("east_asia", "oceania")
+make_sea_route_df <- function(edges_sf) {
+  if (nrow(edges_sf) == 0) return(tibble())
 
-  any(c(class0, class1) %in% pacific_americas) &&
-    any(c(class0, class1) %in% pacific_asia) &&
-    !"BRA" %in% c(n0, n1)
-}
+  map_dfr(seq_len(nrow(edges_sf)), function(i) {
+    edge_row <- edges_sf[i, ]
+    edge_attr <- st_drop_geometry(edge_row)
+    route_id <- paste(edge_attr$Scenario, edge_attr$Symbol, edge_attr$N0, edge_attr$N1, i, sep = "__")
 
-build_sea_route_points <- function(edge_row) {
-  n0 <- edge_row$N0
-  n1 <- edge_row$N1
-  class0 <- route_region_class(n0)
-  class1 <- route_region_class(n1)
-
-  start <- tibble(lon = edge_row$x0, lat = edge_row$y0)
-  end <- tibble(lon = edge_row$x1, lat = edge_row$y1)
-  hubs <- list()
-
-  if (uses_pacific_route(class0, class1, n0, n1)) {
-    north_route <- edge_row$y0 > 0 && edge_row$y1 > 0
-    if (edge_row$x0 > 0 || (edge_row$x0 > edge_row$x1 && abs(edge_row$x0 - edge_row$x1) > 120)) {
-      hubs <- if (north_route) {
-        list(route_hub("dateline_north_w"), route_hub("dateline_north_e"))
-      } else {
-        list(route_hub("dateline_south_w"), route_hub("dateline_south_e"))
-      }
-    } else {
-      hubs <- if (north_route) {
-        list(route_hub("dateline_north_e"), route_hub("dateline_north_w"))
-      } else {
-        list(route_hub("dateline_south_e"), route_hub("dateline_south_w"))
-      }
-    }
-  } else if (any(c(class0, class1) %in% c("east_asia", "oceania")) &&
-             any(c(class0, class1) %in% c("europe", "middle_east", "africa", "south_asia", "eurasia"))) {
-    hubs <- list(route_hub("singapore"))
-
-    if (any(c(class0, class1) %in% c("europe", "eurasia"))) {
-      hubs <- c(hubs, list(route_hub("suez"), route_hub("gibraltar")))
-    } else if (any(c(class0, class1) %in% "middle_east")) {
-      hubs <- c(hubs, list(route_hub("hormuz")))
-    } else if (any(c(n0, n1) %in% "ZAF")) {
-      hubs <- list(route_hub("cape"))
-    }
-
-    if (edge_row$x0 < edge_row$x1) {
-      hubs <- rev(hubs)
-    }
-  } else if (any(c(class0, class1) %in% c("latin_america", "north_america")) &&
-             any(c(class0, class1) %in% c("europe", "africa", "middle_east", "south_asia"))) {
-    hubs <- list(route_hub("gibraltar"))
-
-    if (any(c(class0, class1) %in% c("middle_east", "south_asia"))) {
-      hubs <- c(hubs, list(route_hub("suez")))
-    }
-    if (any(c(n0, n1) %in% c("XLM", "MEX")) &&
-        any(c(class0, class1) %in% c("middle_east", "south_asia"))) {
-      hubs <- c(list(route_hub("panama")), hubs)
-    }
-    if (edge_row$x0 > edge_row$x1) {
-      hubs <- rev(hubs)
-    }
-  } else if (any(c(n0, n1) %in% "BRA") &&
-             any(c(class0, class1) %in% c("east_asia", "oceania"))) {
-    hubs <- list(route_hub("cape"), route_hub("singapore"))
-    if (edge_row$x0 > edge_row$x1) {
-      hubs <- rev(hubs)
-    }
-  }
-
-  bind_rows(c(list(start), hubs, list(end)))
-}
-
-split_route_at_dateline <- function(route_points, route_id) {
-  segments <- vector("list", max(1, nrow(route_points) - 1))
-  out <- list()
-  segment_id <- 1
-
-  for (i in seq_len(nrow(route_points) - 1)) {
-    p0 <- route_points[i, ]
-    p1 <- route_points[i + 1, ]
-
-    if (abs(p1$lon - p0$lon) > 180) {
-      edge_lon0 <- if (p0$lon > 0) 180 else -180
-      edge_lon1 <- -edge_lon0
-      t <- (edge_lon0 - p0$lon) / ((p1$lon + sign(p0$lon) * 360) - p0$lon)
-      edge_lat <- p0$lat + t * (p1$lat - p0$lat)
-
-      out[[length(out) + 1]] <- tibble(
-        route_id = route_id,
-        segment_id = paste0(route_id, "_", segment_id),
-        x = c(p0$lon, edge_lon0),
-        y = c(p0$lat, edge_lat)
+    route_coordinates_df(edge_row, route_id) %>%
+      transmute(
+        route_id,
+        segment_id,
+        coord_order,
+        x,
+        y,
+        Value = edge_attr$Value,
+        Value_plot = edge_attr$Value_plot,
+        N0 = edge_attr$N0,
+        N1 = edge_attr$N1,
+        Scenario = edge_attr$Scenario,
+        Symbol = edge_attr$Symbol
       )
-      segment_id <- segment_id + 1
-      out[[length(out) + 1]] <- tibble(
-        route_id = route_id,
-        segment_id = paste0(route_id, "_", segment_id),
-        x = c(edge_lon1, p1$lon),
-        y = c(edge_lat, p1$lat)
-      )
-    } else {
-      out[[length(out) + 1]] <- tibble(
-        route_id = route_id,
-        segment_id = paste0(route_id, "_", segment_id),
-        x = c(p0$lon, p1$lon),
-        y = c(p0$lat, p1$lat)
-      )
-    }
-    segment_id <- segment_id + 1
-  }
-
-  bind_rows(out)
+  }) %>%
+    arrange(Value, route_id, segment_id, coord_order)
 }
 
-make_sea_route_df <- function(edges_df) {
-  if (nrow(edges_df) == 0) return(tibble())
+make_route_arrow_df <- function(edges_sf) {
+  if (nrow(edges_sf) == 0) return(tibble())
 
-  map_dfr(seq_len(nrow(edges_df)), function(i) {
-    edge_row <- edges_df[i, ]
-    route_id <- paste(edge_row$Scenario, edge_row$Symbol, edge_row$N0, edge_row$N1, i, sep = "__")
-    route_points <- build_sea_route_points(edge_row)
+  terminal_arrow_segment <- function(route_segment) {
+    route_segment <- route_segment %>%
+      arrange(coord_order)
+    n_points <- nrow(route_segment)
+    if (n_points < 2) return(NULL)
 
-    split_route_at_dateline(route_points, route_id) %>%
+    reversed_segment <- route_segment %>%
+      arrange(desc(coord_order)) %>%
       mutate(
-        Value = edge_row$Value,
-        Value_plot = edge_row$Value_plot,
-        N0 = edge_row$N0,
-        N1 = edge_row$N1,
-        Scenario = edge_row$Scenario,
-        Symbol = edge_row$Symbol
+        step_length = c(
+          0,
+          sqrt(diff(x)^2 + diff(y)^2)
+        ),
+        distance_from_end = cumsum(step_length)
       )
-  })
-}
 
-make_route_arrow_df <- function(edges_df) {
-  if (nrow(edges_df) == 0) return(tibble())
+    total_length <- max(reversed_segment$distance_from_end, na.rm = TRUE)
+    if (!is.finite(total_length) || total_length == 0) return(NULL)
 
-  map_dfr(seq_len(nrow(edges_df)), function(i) {
-    edge_row <- edges_df[i, ]
-    route_points <- build_sea_route_points(edge_row)
-    if (nrow(route_points) < 2) return(tibble())
-
-    p0 <- route_points[nrow(route_points) - 1, ]
-    p1 <- route_points[nrow(route_points), ]
-    if (abs(p1$lon - p0$lon) > 180) {
-      p0$lon <- if (p1$lon < 0) -179.7 else 179.7
+    target_length <- min(max(total_length * 0.35, 1.2), 6)
+    if (total_length <= target_length) {
+      p0 <- reversed_segment[n_points, ]
+    } else {
+      after_idx <- which(reversed_segment$distance_from_end >= target_length)[1]
+      before_idx <- after_idx - 1
+      before_point <- reversed_segment[before_idx, ]
+      after_point <- reversed_segment[after_idx, ]
+      segment_length <- after_point$distance_from_end - before_point$distance_from_end
+      segment_share <- if (segment_length == 0) {
+        0
+      } else {
+        (target_length - before_point$distance_from_end) / segment_length
+      }
+      p0 <- tibble(
+        x = before_point$x + segment_share * (after_point$x - before_point$x),
+        y = before_point$y + segment_share * (after_point$y - before_point$y)
+      )
     }
 
-    tibble(
-      x = p0$lon,
-      y = p0$lat,
-      xend = p1$lon,
-      yend = p1$lat,
-      Value = edge_row$Value,
-      Value_plot = edge_row$Value_plot
-    )
-  })
+    p1 <- reversed_segment[1, ]
+    tibble(x = p0$x, y = p0$y, xend = p1$x, yend = p1$y)
+  }
+
+  map_dfr(seq_len(nrow(edges_sf)), function(i) {
+    edge_row <- edges_sf[i, ]
+    edge_attr <- st_drop_geometry(edge_row)
+    route_id <- paste(edge_attr$Scenario, edge_attr$Symbol, edge_attr$N0, edge_attr$N1, i, sep = "__")
+
+    route_df <- route_coordinates_df(edge_row, route_id) %>%
+      arrange(coord_order)
+    if (nrow(route_df) < 2) return(tibble())
+
+    candidate_segments <- route_df %>%
+      group_by(segment_id) %>%
+      filter(n() >= 2) %>%
+      ungroup()
+    if (nrow(candidate_segments) < 2) return(tibble())
+
+    last_segment <- candidate_segments %>%
+      filter(segment_id == last(segment_id)) %>%
+      arrange(coord_order)
+    arrow_segment <- terminal_arrow_segment(last_segment)
+    if (is.null(arrow_segment)) return(tibble())
+
+    arrow_segment %>%
+      mutate(
+        Value = edge_attr$Value,
+        Value_plot = edge_attr$Value_plot
+      )
+  }) %>%
+    arrange(Value)
 }
 
-plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec) {
+add_trade_arrows <- function(p, arrow_df) {
+  if (nrow(arrow_df) == 0) return(p)
+
+  arrow_breaks <- quantile(arrow_df$Value, probs = c(0.5, 0.85), na.rm = TRUE, names = FALSE)
+  arrow_df <- arrow_df %>%
+    mutate(
+      ArrowGroup = case_when(
+        Value >= arrow_breaks[[2]] ~ "large",
+        Value >= arrow_breaks[[1]] ~ "medium",
+        TRUE ~ "small"
+      ),
+      ArrowGroup = factor(ArrowGroup, levels = c("small", "medium", "large"))
+    )
+
+  arrow_styles <- tribble(
+    ~ArrowGroup, ~HaloWidth, ~ArrowLength,
+    "small",       0.35,       1.1,
+    "medium",      0.65,       1.9,
+    "large",       1.00,       3.0
+  )
+
+  for (i in seq_len(nrow(arrow_styles))) {
+    arrow_group <- arrow_styles$ArrowGroup[i]
+    arrow_data <- arrow_df %>% filter(ArrowGroup == arrow_group)
+    if (nrow(arrow_data) == 0) next
+
+    p <- p +
+      geom_segment(
+        data = arrow_data,
+        aes(x = x, y = y, xend = xend, yend = yend),
+        color = "white",
+        linewidth = arrow_styles$HaloWidth[i],
+        alpha = 0.7,
+        lineend = "round",
+        arrow = arrow(length = unit(arrow_styles$ArrowLength[i] + 0.25, "mm"), type = "closed"),
+        show.legend = FALSE
+      ) +
+      geom_segment(
+        data = arrow_data,
+        aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot, color = Value_plot),
+        alpha = 0.86,
+        lineend = "round",
+        arrow = arrow(length = unit(arrow_styles$ArrowLength[i], "mm"), type = "closed")
+      )
+  }
+
+  p
+}
+
+plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NULL, map_spec = NULL) {
   if (nrow(edges_sf) == 0) {
     warning("No plottable trade links for scenario: ", scenario_name, " / ", overlay_spec$Carrier)
     return(NULL)
@@ -476,76 +494,81 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec) {
   brks <- brks[brks <= vmax]
   if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
 
-  edges_plot_df <- edges_sf %>%
-    mutate(Value_plot = log10(1 + Value)) %>%
+  edges_plot_sf <- edges_sf %>%
+    mutate(Value_plot = log10(1 + Value))
+  edges_plot_df <- edges_plot_sf %>%
     st_drop_geometry()
-  edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
-  edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
+  edges_arrow_sf <- edges_plot_sf %>% filter(Value > arrow_threshold)
   route_nodes_df <- bind_rows(
     edges_plot_df %>% transmute(N_PSY = N0, lon = x0, lat = y0),
     edges_plot_df %>% transmute(N_PSY = N1, lon = x1, lat = y1)
   ) %>%
     distinct(N_PSY, lon, lat)
-  sea_route_line_df <- make_sea_route_df(edges_plot_df)
-  sea_route_arrow_df <- make_route_arrow_df(edges_arrow_df)
+  sea_route_line_df <- make_sea_route_df(edges_plot_sf)
+  sea_route_arrow_df <- make_route_arrow_df(edges_arrow_sf)
 
   p <- ggplot()
+
+  if (!is.null(map_data) && !is.null(map_spec)) {
+    plot_map_data <- map_data %>%
+      filter(Scenario == scenario_name, Carrier == overlay_spec$Carrier)
+
+    p <- p +
+      geom_sf(data = plot_map_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
+      scale_fill_gradient(
+        low = map_spec$FillLow,
+        high = map_spec$FillHigh,
+        na.value = "grey92",
+        labels = scales::label_number(accuracy = 0.01),
+        name = map_spec$LegendTitle
+      )
+  } else {
+    p <- p +
+      geom_sf(data = region_boundaries, fill = NA, color = "grey45", linewidth = 0.35)
+  }
+
   p <- p +
-    geom_sf(data = region_boundaries, fill = NA, color = "grey45", linewidth = 0.35) +
     geom_path(
       data = sea_route_line_df,
       aes(x = x, y = y, group = segment_id),
       color = "white",
-      linewidth = 0.9,
-      alpha = 0.75,
+      linewidth = 0.25,
+      alpha = 0.55,
       lineend = "round",
       show.legend = FALSE
     ) +
     geom_path(
       data = sea_route_line_df,
       aes(x = x, y = y, group = segment_id, linewidth = Value_plot, color = Value_plot),
-      alpha = 0.82,
+      alpha = 0.86,
       lineend = "round"
-    ) +
-    geom_segment(
-      data = sea_route_arrow_df,
-      aes(x = x, y = y, xend = xend, yend = yend),
-      color = "white",
-      linewidth = 0.9,
-      alpha = 0.75,
-      lineend = "round",
-      arrow = arrow(length = unit(1.55, "mm"), type = "closed"),
-      show.legend = FALSE
-    ) +
-    geom_segment(
-      data = sea_route_arrow_df,
-      aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot, color = Value_plot),
-      alpha = 0.82,
-      lineend = "round",
-      arrow = arrow(length = unit(1.45, "mm"), type = "closed")
-    ) +
+    )
+
+  p <- add_trade_arrows(p, sea_route_arrow_df)
+
+  p <- p +
     geom_point(
       data = route_nodes_df,
       aes(x = lon, y = lat),
       shape = 21,
-      size = 1.5,
-      stroke = 0.25,
+      size = 2.8,
+      stroke = 0.55,
       color = "grey20",
       fill = "white",
-      alpha = 0.9,
+      alpha = 0.95,
       inherit.aes = FALSE
     )
 
   p +
     scale_linewidth_continuous(
-      range = c(0.25, 1.45),
+      range = c(0.05, 2.4),
       breaks = log10(1 + brks),
       labels = scales::label_number(accuracy = 1)(brks),
       name = "vff_l / vfb_l annual flow (GWh/yr)"
     ) +
     scale_color_gradient(
-      low = "#ffd34d",
-      high = "#b2182b",
+      low = overlay_spec$FlowLow,
+      high = overlay_spec$FlowHigh,
       breaks = log10(1 + brks),
       labels = scales::label_number(accuracy = 1)(brks),
       name = "vff_l / vfb_l annual flow (GWh/yr)"
@@ -580,6 +603,11 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec) {
         scenario_name,
         " ",
         overlay_spec$TitleLabel,
+        if (!is.null(map_spec)) {
+          paste0(" and ", map_spec$MapLabel)
+        } else {
+          ""
+        },
         " combined sea trade flow (",
         plot_year,
         ")"
@@ -587,19 +615,18 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec) {
     )
 }
 
-if (!file.exists(nh3_node_csv)) {
-  stop(
-    "Missing NH3 node coordinate CSV: ",
-    nh3_node_csv,
-    ". Run code/worldmap_plot.R first."
-  )
+trade_port_nodes_tbl <- load_trade_nodes(searoute_representative_path)
+sea_routes_sf <- load_sea_routes(searoute_path)
+trade_map_values <- read_trade_map_values(merged_gdx_path, trade_map_specs)
+if (nrow(trade_map_values) == 0) {
+  warning("No demand map values were read from iamc_gdx: ", merged_gdx_path)
 }
-
-trade_port_nodes_tbl <- load_trade_nodes(nh3_node_csv, trade_port_csv)
-navigation_distances <- load_navigation_distances(nv_dist_csv)
+trade_map_data <- build_trade_map_data(region_boundaries, trade_map_values, trade_map_specs)
 
 for (i in seq_len(nrow(overlay_specs))) {
   overlay_spec <- overlay_specs[i, ]
+  map_spec <- trade_map_specs %>%
+    filter(Carrier == overlay_spec$Carrier)
 
   for (scenario_name in scenarios) {
     overlay_dir <- file.path(base_dir, scenario_name, overlay_spec$Folder, "vff_l_vfb_l_combined")
@@ -612,7 +639,7 @@ for (i in seq_len(nrow(overlay_specs))) {
         flow_spec = flow_specs[j, ]
       )
     }) %>%
-      make_transport_edges_sf(trade_port_nodes_tbl, navigation_distances)
+      make_transport_edges_sf(trade_port_nodes_tbl, sea_routes_sf)
 
     p <- plot_trade_flow(
       edges_sf = edges_combined_sf,
@@ -635,6 +662,39 @@ for (i in seq_len(nrow(overlay_specs))) {
         )
       ),
       plot = p,
+      width = 300,
+      height = 150,
+      units = "mm",
+      dpi = 300,
+      bg = "white"
+    )
+
+    overlay_map_dir <- file.path(base_dir, scenario_name, overlay_spec$Folder, "demand_trade_overlay")
+    dir.create(overlay_map_dir, recursive = TRUE, showWarnings = FALSE)
+
+    p_overlay <- plot_trade_flow(
+      edges_sf = edges_combined_sf,
+      scenario_name = scenario_name,
+      overlay_spec = overlay_spec,
+      map_data = trade_map_data,
+      map_spec = map_spec
+    )
+    if (is.null(p_overlay)) next
+
+    ggsave(
+      filename = file.path(
+        overlay_map_dir,
+        paste0(
+          "global_",
+          scenario_name,
+          "_vff_l_vfb_l_combined_",
+          overlay_spec$Carrier,
+          "_demand_trade_overlay_",
+          plot_year,
+          ".png"
+        )
+      ),
+      plot = p_overlay,
       width = 300,
       height = 150,
       units = "mm",

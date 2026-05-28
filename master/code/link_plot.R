@@ -45,6 +45,28 @@ value_specs <- tribble(
 )
 
 arrow_threshold <- 10
+h2_link_low <- "#bdd7e7"
+h2_link_high <- "#2b8cbe"
+
+link_flow_color_scale <- function(link_spec, brks, legend_title) {
+  if (link_spec$LinkType == "H2") {
+    scale_color_gradient(
+      low = h2_link_low,
+      high = h2_link_high,
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 1)(brks),
+      name = legend_title
+    )
+  } else {
+    scale_color_viridis_c(
+      option = link_spec$Palette,
+      direction = -1,
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 1)(brks),
+      name = legend_title
+    )
+  }
+}
 
 build_region_boundaries <- function() {
   world <- ne_countries(scale = "medium", returnclass = "sf") %>%
@@ -267,11 +289,11 @@ make_edges_sf <- function(df_link) {
   st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
 }
 
-plot_transmission <- function(edges_sf, scenario_name, title_label, palette, value_spec) {
+plot_transmission <- function(edges_sf, scenario_name, link_spec, value_spec) {
   if (nrow(edges_sf) == 0) {
     warning(
       "No plottable ",
-      title_label,
+      link_spec$TitleLabel,
       " links for scenario: ",
       scenario_name,
       " / ",
@@ -305,13 +327,7 @@ plot_transmission <- function(edges_sf, scenario_name, title_label, palette, val
       labels = scales::label_number(accuracy = 1)(brks),
       name = value_spec$LegendTitle
     ) +
-    scale_color_viridis_c(
-      option = palette,
-      direction = -1,
-      breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = value_spec$LegendTitle
-    ) +
+    link_flow_color_scale(link_spec, brks, value_spec$LegendTitle) +
     coord_sf(ylim = c(-60, 75), expand = FALSE) +
     theme_void() +
     theme(
@@ -326,7 +342,7 @@ plot_transmission <- function(edges_sf, scenario_name, title_label, palette, val
       title = paste0(
         scenario_name,
         " inter-regional ",
-        title_label,
+        link_spec$TitleLabel,
         " ",
         value_spec$TitleMetric,
         " (",
@@ -360,7 +376,7 @@ plot_transmission <- function(edges_sf, scenario_name, title_label, palette, val
   }
 }
 
-plot_combined_flow <- function(edges_sf, scenario_name, title_label, palette) {
+plot_combined_flow <- function(edges_sf, scenario_name, link_spec) {
   if (nrow(edges_sf) == 0) {
     warning("No plottable combined flow links for scenario: ", scenario_name)
     return(NULL)
@@ -398,13 +414,7 @@ plot_combined_flow <- function(edges_sf, scenario_name, title_label, palette) {
       labels = scales::label_number(accuracy = 1)(brks),
       name = "vff_l / vfb_l annual flow (GWh/yr)"
     ) +
-    scale_color_viridis_c(
-      option = palette,
-      direction = -1,
-      breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "vff_l / vfb_l annual flow (GWh/yr)"
-    ) +
+    link_flow_color_scale(link_spec, brks, "vff_l / vfb_l annual flow (GWh/yr)") +
     coord_sf(ylim = c(-60, 75), expand = FALSE) +
     theme_void() +
     theme(
@@ -419,7 +429,7 @@ plot_combined_flow <- function(edges_sf, scenario_name, title_label, palette) {
       title = paste0(
         scenario_name,
         " inter-regional ",
-        title_label,
+        link_spec$TitleLabel,
         " combined annual flow from vff_l and vfb_l (GWh/yr, ",
         plot_year,
         ")"
@@ -448,8 +458,7 @@ walk(seq_len(nrow(link_types)), function(i) {
       p <- plot_transmission(
         edges_sf = edges_sf,
         scenario_name = scenario_name,
-        title_label = spec$TitleLabel,
-        palette = spec$Palette,
+        link_spec = spec,
         value_spec = value_spec
       )
       if (is.null(p)) next
@@ -499,8 +508,7 @@ walk(seq_len(nrow(link_types)), function(i) {
     p <- plot_combined_flow(
       edges_sf = edges_combined_sf,
       scenario_name = scenario_name,
-      title_label = spec$TitleLabel,
-      palette = spec$Palette
+      link_spec = spec
     )
     if (is.null(p)) next
 
@@ -534,7 +542,7 @@ merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
 link_demand_specs <- tribble(
   ~LinkType, ~Folder,          ~DemandVariable, ~DemandLabel,          ~FillLow,   ~FillHigh,
   "AC",      "plot_link_ele",  "Sec_Ene_Ele",   "Electricity supply",  "#f7fbff", "#08306b",
-  "H2",      "plot_link_h2",   "Sec_Ene_Hyd",   "Hydrogen demand",     "#f7fbff", "#08306b"
+  "H2",      "plot_link_h2",   "Sec_Ene_Hyd",   "Hydrogen demand",     "#f7f7f7", "#252525"
 )
 
 read_demand_values <- function(gdx_path, variables) {
@@ -613,25 +621,6 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
     geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
     geom_segment(
       data = edges_line_df,
-      aes(x = x0, y = y0, xend = x1, yend = y1),
-      color = "white",
-      linewidth = 0.9,
-      alpha = 0.75,
-      lineend = "round",
-      show.legend = FALSE
-    ) +
-    geom_segment(
-      data = edges_arrow_df,
-      aes(x = x0, y = y0, xend = x1, yend = y1),
-      color = "white",
-      linewidth = 0.9,
-      alpha = 0.75,
-      lineend = "round",
-      arrow = arrow(length = unit(1.55, "mm"), type = "closed"),
-      show.legend = FALSE
-    ) +
-    geom_segment(
-      data = edges_line_df,
       aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot, color = Value_plot),
       alpha = 0.82,
       lineend = "round"
@@ -656,13 +645,7 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
       labels = scales::label_number(accuracy = 1)(brks),
       name = "vff_l / vfb_l annual flow (GWh/yr)"
     ) +
-    scale_color_gradient(
-      low = "#ffd34d",
-      high = "#b2182b",
-      breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "vff_l / vfb_l annual flow (GWh/yr)"
-    ) +
+    link_flow_color_scale(link_spec, brks, "vff_l / vfb_l annual flow (GWh/yr)") +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +
     theme(
