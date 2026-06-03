@@ -651,20 +651,9 @@ scenario_shape <- setNames(
   target_scenarios
 )
 
-scenario_line_levels <- c(
-  paste("AIM-Technology", target_scenarios, sep = " | "),
-  paste("PSM-12DAY", target_scenarios, sep = " | ")
-)
-
-scenario_line_color <- c(
-  setNames(
-    grDevices::colorRampPalette(c("#000000", "#bdbdbd"))(length(target_scenarios)),
-    paste("AIM-Technology", target_scenarios, sep = " | ")
-  ),
-  setNames(
-    grDevices::colorRampPalette(c("#99000d", "#fb6a4a"))(length(target_scenarios)),
-    paste("PSM-12DAY", target_scenarios, sep = " | ")
-  )
+scenario_linetype <- setNames(
+  rep(c("solid", "dashed", "dotted", "dotdash", "longdash"), length.out = length(target_scenarios)),
+  target_scenarios
 )
 
 prep_scenario_line_data <- function(d, value_col = "Value") {
@@ -672,13 +661,12 @@ prep_scenario_line_data <- function(d, value_col = "Value") {
     mutate(
       Scenario = factor(as.character(Scenario), levels = target_scenarios),
       Model = factor(as.character(Model), levels = names(model_color)),
-      ModelScenario = factor(paste(Model, Scenario, sep = " | "), levels = scenario_line_levels),
       Region = factor(as.character(Region), levels = region_list_plot)
     ) %>%
     filter(!is.na(.data[[value_col]]))
 }
 
-save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, width = 260, height = 260) {
+save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, width = 260, height = 280) {
   if (nrow(d) == 0) return(invisible(FALSE))
 
   d <- prep_scenario_line_data(d, y_col)
@@ -688,7 +676,8 @@ save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, wid
     aes(
       x = Year,
       y = .data[[y_col]],
-      color = ModelScenario,
+      color = Model,
+      linetype = Scenario,
       shape = Scenario,
       group = interaction(Region, Model, Scenario)
     )
@@ -696,13 +685,21 @@ save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, wid
     geom_line(linewidth = 0.35) +
     geom_point(size = 1.8, stroke = 0.5) +
     expand_limits(y = 0) +
-    scale_color_manual(values = scenario_line_color, drop = FALSE, name = "Model / Scenario") +
-    scale_shape_manual(values = scenario_shape, drop = FALSE, name = "Scenario") +
+    scale_color_manual(values = model_color, drop = TRUE, name = "Model") +
+    scale_linetype_manual(values = scenario_linetype, drop = TRUE, name = "Scenario") +
+    scale_shape_manual(values = scenario_shape, drop = TRUE, name = "Scenario") +
     facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
+    guides(
+      color = guide_legend(order = 1, nrow = 1),
+      linetype = guide_legend(order = 2, nrow = 1),
+      shape = guide_legend(order = 2, nrow = 1)
+    ) +
     labs(y = ylab, title = title) +
     MyTheme +
     theme(
       legend.position = "bottom",
+      legend.box = "vertical",
+      legend.text = element_text(size = 8),
       strip.text = element_text(size = 8),
       axis.text = element_text(size = 7),
       axis.title.x = element_blank()
@@ -832,11 +829,16 @@ save_scenario_line_plot(
 )
 
 power_model_label <- c("AIM-Technology" = "AIM", "PSM-12DAY" = "PSM")
-scenario_power_x_levels <- as.vector(t(outer(target_scenarios, names(model_color), paste, sep = " | ")))
-scenario_power_x_labels <- as.vector(
-  t(outer(target_scenarios, power_model_label[names(model_color)], paste, sep = "\n"))
-)
-names(scenario_power_x_labels) <- scenario_power_x_levels
+scenario_power_x_axis <- expand_grid(
+  Scenario = target_scenarios,
+  Model = names(model_color)
+) %>%
+  mutate(
+    level = paste(Scenario, Model, sep = " | "),
+    label = paste(Scenario, power_model_label[Model], sep = "\n")
+  )
+scenario_power_x_levels <- scenario_power_x_axis$level
+scenario_power_x_labels <- setNames(scenario_power_x_axis$label, scenario_power_x_axis$level)
 
 df_secele_scenario <- df_secele %>%
   mutate(
@@ -846,8 +848,12 @@ df_secele_scenario <- df_secele %>%
     Region = factor(as.character(Region), levels = region_list_plot)
   )
 
-if (nrow(df_secele_scenario) > 0) {
-  p <- df_secele_scenario %>%
+df_secele_scenario_nonzero <- df_secele_scenario %>%
+  filter(!is.na(Value), Value != 0) %>%
+  mutate(Variable = droplevels(Variable))
+
+if (nrow(df_secele_scenario_nonzero) > 0) {
+  p <- df_secele_scenario_nonzero %>%
     ggplot() +
     geom_bar(aes(x = ScenarioModel, y = Value, fill = Variable), stat = "identity", width = 0.82) +
     scale_x_discrete(labels = scenario_power_x_labels, drop = FALSE) +
@@ -879,13 +885,18 @@ if (nrow(df_secele_scenario) > 0) {
     height = 300
   )
 
-  model_grouped_power_x_levels <- as.vector(outer(names(model_color), target_scenarios, paste, sep = " | "))
-  model_grouped_power_x_labels <- as.vector(
-    outer(power_model_label[names(model_color)], target_scenarios, paste, sep = "\n")
-  )
-  names(model_grouped_power_x_labels) <- model_grouped_power_x_levels
+  model_grouped_power_x_axis <- expand_grid(
+    Model = names(model_color),
+    Scenario = target_scenarios
+  ) %>%
+    mutate(
+      level = paste(Model, Scenario, sep = " | "),
+      label = paste(power_model_label[Model], Scenario, sep = "\n")
+    )
+  model_grouped_power_x_levels <- model_grouped_power_x_axis$level
+  model_grouped_power_x_labels <- setNames(model_grouped_power_x_axis$label, model_grouped_power_x_axis$level)
 
-  df_secele_model_grouped <- df_secele_scenario %>%
+  df_secele_model_grouped <- df_secele_scenario_nonzero %>%
     mutate(
       ModelScenarioGrouped = factor(paste(Model, Scenario, sep = " | "), levels = model_grouped_power_x_levels)
     )
