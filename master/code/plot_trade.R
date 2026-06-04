@@ -112,8 +112,9 @@ main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
 merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
+gwh_to_ej <- 3.6e-6
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
-arrow_threshold <- 10
+arrow_threshold <- 10 * gwh_to_ej
 
 flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -196,6 +197,22 @@ fixed_fill_limits <- function(values) {
   c(0, vmax)
 }
 
+make_flow_breaks <- function(vmax) {
+  if (!is.finite(vmax) || vmax <= 0) {
+    return(1)
+  }
+
+  if (vmax < 1) {
+    brks <- pretty(c(0, vmax), n = 4)
+    return(brks[brks > 0 & brks <= vmax])
+  }
+
+  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
+  brks <- brks[brks <= vmax]
+  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks
+}
+
 read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   flow_gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
   if (!file.exists(flow_gdx_path)) {
@@ -212,6 +229,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   df_link <- df_raw %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = Value * gwh_to_ej) %>%
     filter(Value > 0)
 
   if (nrow(df_link) == 0) {
@@ -496,9 +514,7 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NU
   }
 
   vmax <- max(edges_sf$Value, na.rm = TRUE)
-  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
-  brks <- brks[brks <= vmax]
-  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks <- make_flow_breaks(vmax)
 
   edges_plot_sf <- edges_sf %>%
     mutate(Value_plot = log10(1 + Value))
@@ -574,15 +590,15 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NU
     scale_linewidth_continuous(
       range = c(0.05, 2.4),
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "vff_l / vfb_l annual flow (GWh/yr)"
+      labels = scales::label_number(accuracy = 0.00001)(brks),
+      name = "vff_l / vfb_l annual flow (EJ/yr)"
     ) +
     scale_color_gradient(
       low = overlay_spec$FlowLow,
       high = overlay_spec$FlowHigh,
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "vff_l / vfb_l annual flow (GWh/yr)"
+      labels = scales::label_number(accuracy = 0.00001)(brks),
+      name = "vff_l / vfb_l annual flow (EJ/yr)"
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +

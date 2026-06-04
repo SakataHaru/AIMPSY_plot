@@ -124,7 +124,8 @@ prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_p
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
-arrow_threshold <- 10
+gwh_to_ej <- 3.6e-6
+arrow_threshold <- 10 * gwh_to_ej
 
 flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -154,6 +155,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   df_link <- df_raw %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = Value * gwh_to_ej) %>%
     filter(Value > 0)
 
   if (nrow(df_link) == 0) {
@@ -509,8 +511,8 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
     scale_linewidth_continuous(
       range = c(0.05, 2.4),
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = paste0("|", scenario_name, " - ", base_scenario_name, "| annual flow (GWh/yr)")
+      labels = scales::label_number(accuracy = 0.00001)(brks),
+      name = paste0("|", scenario_name, " - ", base_scenario_name, "| annual flow (EJ/yr)")
     ) +
     scale_color_gradient2(
       low = "#2166ac",
@@ -518,8 +520,8 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
       high = "#b2182b",
       midpoint = 0,
       limits = c(-vmax, vmax),
-      labels = scales::label_number(accuracy = 1),
-      name = paste0(scenario_name, " - ", base_scenario_name, " annual flow (GWh/yr)")
+      labels = scales::label_number(accuracy = 0.00001),
+      name = paste0(scenario_name, " - ", base_scenario_name, " annual flow (EJ/yr)")
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +

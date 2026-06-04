@@ -42,7 +42,28 @@ arrow_threshold <- 10
 h2_color <- "#2b8cbe"
 nh3_color <- "#c51b7d"
 
-source_trade_region_functions <- function(path = "code/plot_trade.R") {
+script_dir <- {
+  file_arg <- commandArgs(trailingOnly = FALSE) %>%
+    str_subset("^--file=") %>%
+    str_remove("^--file=")
+
+  if (length(file_arg) > 0) {
+    dirname(normalizePath(file_arg[[1]], winslash = "/", mustWork = FALSE))
+  } else {
+    normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+  }
+}
+
+source_trade_region_functions <- function(path = file.path(script_dir, "plot_trade.R")) {
+  if (!file.exists(path)) {
+    fallback_path <- file.path("master", "code", "plot_trade.R")
+    if (file.exists(fallback_path)) {
+      path <- fallback_path
+    } else {
+      stop("Could not find plot_trade.R at: ", path, " or ", fallback_path)
+    }
+  }
+
   lines <- readLines(path, warn = FALSE)
   start <- grep("^build_region_map <- function", lines)[1]
   end <- grep("^region_boundaries <- build_region_boundaries", lines)[1] - 1
@@ -55,6 +76,7 @@ source_trade_region_functions <- function(path = "code/plot_trade.R") {
 
 source_trade_region_functions()
 region_boundaries <- build_region_boundaries()
+gwh_to_ej <- 3.6e-6
 
 network_flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -76,6 +98,7 @@ read_h2_link_value <- function(scenario_name, flow_spec) {
     filter(str_detect(L, ".*-H2_.*-H2$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = Value * gwh_to_ej) %>%
     filter(Value > 0) %>%
     separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
     mutate(
@@ -105,6 +128,7 @@ read_nh3_trade_value <- function(scenario_name, flow_spec) {
     filter(str_detect(L, "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = Value * gwh_to_ej) %>%
     filter(Value > 0)
 
   if (nrow(df_link) == 0) {
@@ -262,6 +286,12 @@ fixed_fill_limits <- function(values) {
 log_value_breaks <- function(values) {
   vmax <- max(values, na.rm = TRUE)
   if (!is.finite(vmax) || vmax <= 0) return(1)
+
+  if (vmax < 1) {
+    brks <- pretty(c(0, vmax), n = 4)
+    return(brks[brks > 0 & brks <= vmax])
+  }
+
   brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
   brks <- brks[brks <= vmax]
   if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
@@ -385,13 +415,14 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
   h2_plot_df <- h2_edges_sf %>%
     mutate(Value_plot = log10(1 + Value)) %>%
     st_drop_geometry()
-  h2_line_df <- h2_plot_df %>% filter(Value <= arrow_threshold)
-  h2_arrow_df <- h2_plot_df %>% filter(Value > arrow_threshold)
+  arrow_threshold_ej <- arrow_threshold * gwh_to_ej
+  h2_line_df <- h2_plot_df %>% filter(Value <= arrow_threshold_ej)
+  h2_arrow_df <- h2_plot_df %>% filter(Value > arrow_threshold_ej)
 
   nh3_plot_sf <- nh3_edges_sf %>%
     mutate(Value_plot = log10(1 + Value))
   nh3_route_df <- make_sea_route_df(nh3_plot_sf)
-  nh3_arrow_df <- make_nh3_arrow_df(nh3_plot_sf %>% filter(Value > arrow_threshold))
+  nh3_arrow_df <- make_nh3_arrow_df(nh3_plot_sf %>% filter(Value > arrow_threshold_ej))
   nh3_nodes_df <- nh3_plot_sf %>%
     st_drop_geometry() %>%
     transmute(N0, N1, x0, y0, x1, y1) %>%
@@ -479,15 +510,15 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
     scale_linewidth_continuous(
       range = c(0.08, 2.2),
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "Network flow (GWh/yr)"
+      labels = scales::label_number(accuracy = 0.00001)(brks),
+      name = "Network flow (EJ/yr)"
     ) +
     scale_color_gradient(
       low = "#e0ecf4",
       high = "#4a1486",
       breaks = log10(1 + nh3_brks),
-      labels = scales::label_number(accuracy = 1)(nh3_brks),
-      name = "NH3 sea trade (GWh/yr)"
+      labels = scales::label_number(accuracy = 0.00001)(nh3_brks),
+      name = "NH3 sea trade (EJ/yr)"
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +

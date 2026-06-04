@@ -31,6 +31,7 @@ prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 
 data_dir <- "data"
 base_dir <- file.path("output", paste0("global_", substr(date, 1, 6)))
+gwh_to_ej <- 3.6e-6
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link_ele","AC",    "AC",            "plasma",
@@ -48,13 +49,62 @@ arrow_threshold <- 10
 h2_link_low <- "#bdd7e7"
 h2_link_high <- "#2b8cbe"
 
-link_flow_color_scale <- function(link_spec, brks, legend_title) {
+is_h2_annual_flow <- function(link_spec, value_spec = NULL) {
+  link_spec$LinkType == "H2" && (is.null(value_spec) || value_spec$Symbol %in% c("vff_l", "vfb_l"))
+}
+
+link_value_multiplier <- function(link_spec, value_spec) {
+  if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
+}
+
+link_arrow_threshold <- function(link_spec, value_spec = NULL) {
+  if (is_h2_annual_flow(link_spec, value_spec)) arrow_threshold * gwh_to_ej else arrow_threshold
+}
+
+link_flow_legend_title <- function(link_spec, value_spec = NULL, combined = FALSE) {
+  if (combined) {
+    if (is_h2_annual_flow(link_spec, value_spec)) {
+      "vff_l / vfb_l annual flow (EJ/yr)"
+    } else {
+      "vff_l / vfb_l annual flow (GWh/yr)"
+    }
+  } else if (is_h2_annual_flow(link_spec, value_spec)) {
+    str_replace(value_spec$LegendTitle, "GWh/yr", "EJ/yr")
+  } else {
+    value_spec$LegendTitle
+  }
+}
+
+link_flow_title_metric <- function(link_spec, value_spec, combined = FALSE) {
+  if (combined) {
+    if (is_h2_annual_flow(link_spec, value_spec)) {
+      "combined annual flow from vff_l and vfb_l (EJ/yr)"
+    } else {
+      "combined annual flow from vff_l and vfb_l (GWh/yr)"
+    }
+  } else if (is_h2_annual_flow(link_spec, value_spec)) {
+    str_replace(value_spec$TitleMetric, "GWh/yr", "EJ/yr")
+  } else {
+    value_spec$TitleMetric
+  }
+}
+
+link_flow_labeler <- function(link_spec, value_spec = NULL) {
+  if (is_h2_annual_flow(link_spec, value_spec)) {
+    scales::label_number(accuracy = 0.00001)
+  } else {
+    scales::label_number(accuracy = 1)
+  }
+}
+
+link_flow_color_scale <- function(link_spec, brks, legend_title, value_spec = NULL) {
+  flow_labels <- link_flow_labeler(link_spec, value_spec)(brks)
   if (link_spec$LinkType == "H2") {
     scale_color_gradient(
       low = h2_link_low,
       high = h2_link_high,
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
+      labels = flow_labels,
       name = legend_title
     )
   } else {
@@ -62,10 +112,26 @@ link_flow_color_scale <- function(link_spec, brks, legend_title) {
       option = link_spec$Palette,
       direction = -1,
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
+      labels = flow_labels,
       name = legend_title
     )
   }
+}
+
+make_flow_breaks <- function(vmax) {
+  if (!is.finite(vmax) || vmax <= 0) {
+    return(1)
+  }
+
+  if (vmax < 1) {
+    brks <- pretty(c(0, vmax), n = 4)
+    return(brks[brks > 0 & brks <= vmax])
+  }
+
+  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
+  brks <- brks[brks <= vmax]
+  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks
 }
 
 build_region_boundaries <- function() {
@@ -226,7 +292,7 @@ normalize_link_node <- function(node_name, node_suffix) {
     str_remove("^R31-")
 }
 
-read_link_value <- function(scenario_name, link_pattern, node_suffix, value_spec) {
+read_link_value <- function(scenario_name, link_pattern, node_suffix, value_spec, value_multiplier = 1) {
   gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
   if (!file.exists(gdx_path)) {
     stop("Missing GDX file: ", gdx_path)
@@ -252,6 +318,7 @@ read_link_value <- function(scenario_name, link_pattern, node_suffix, value_spec
   }
 
   df_link %>%
+    mutate(Value = Value * value_multiplier) %>%
     separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
     mutate(
       Scenario = scenario_name,
@@ -303,16 +370,18 @@ plot_transmission <- function(edges_sf, scenario_name, link_spec, value_spec) {
   }
 
   vmax <- max(edges_sf$Value, na.rm = TRUE)
-  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
-  brks <- brks[brks <= vmax]
-  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks <- make_flow_breaks(vmax)
 
   edges_plot <- edges_sf %>%
     mutate(Value_plot = log10(1 + Value))
 
   edges_plot_df <- edges_plot %>% st_drop_geometry()
-  edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
-  edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
+  plot_arrow_threshold <- link_arrow_threshold(link_spec, value_spec)
+  legend_title <- link_flow_legend_title(link_spec, value_spec)
+  title_metric <- link_flow_title_metric(link_spec, value_spec)
+  flow_labels <- link_flow_labeler(link_spec, value_spec)(brks)
+  edges_line_df <- edges_plot_df %>% filter(Value <= plot_arrow_threshold)
+  edges_arrow_df <- edges_plot_df %>% filter(Value > plot_arrow_threshold)
   linewidth_range <- if (value_spec$Direction %in% c("forward", "backward")) {
     c(0.08, 1.05)
   } else {
@@ -324,10 +393,10 @@ plot_transmission <- function(edges_sf, scenario_name, link_spec, value_spec) {
     scale_linewidth_continuous(
       range = linewidth_range,
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = value_spec$LegendTitle
+      labels = flow_labels,
+      name = legend_title
     ) +
-    link_flow_color_scale(link_spec, brks, value_spec$LegendTitle) +
+    link_flow_color_scale(link_spec, brks, legend_title, value_spec) +
     coord_sf(ylim = c(-60, 75), expand = FALSE) +
     theme_void() +
     theme(
@@ -344,7 +413,7 @@ plot_transmission <- function(edges_sf, scenario_name, link_spec, value_spec) {
         " inter-regional ",
         link_spec$TitleLabel,
         " ",
-        value_spec$TitleMetric,
+        title_metric,
         " (",
         plot_year,
         ")"
@@ -383,15 +452,17 @@ plot_combined_flow <- function(edges_sf, scenario_name, link_spec) {
   }
 
   vmax <- max(edges_sf$Value, na.rm = TRUE)
-  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
-  brks <- brks[brks <= vmax]
-  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks <- make_flow_breaks(vmax)
 
   edges_plot_df <- edges_sf %>%
     mutate(Value_plot = log10(1 + Value)) %>%
     st_drop_geometry()
-  edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
-  edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
+  plot_arrow_threshold <- link_arrow_threshold(link_spec)
+  legend_title <- link_flow_legend_title(link_spec, combined = TRUE)
+  title_metric <- link_flow_title_metric(link_spec, value_spec = NULL, combined = TRUE)
+  flow_labels <- link_flow_labeler(link_spec)(brks)
+  edges_line_df <- edges_plot_df %>% filter(Value <= plot_arrow_threshold)
+  edges_arrow_df <- edges_plot_df %>% filter(Value > plot_arrow_threshold)
 
   ggplot() +
     geom_sf(data = region_boundaries, fill = NA, color = "grey45", linewidth = 0.35) +
@@ -411,10 +482,10 @@ plot_combined_flow <- function(edges_sf, scenario_name, link_spec) {
     scale_linewidth_continuous(
       range = c(0.08, 1.05),
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "vff_l / vfb_l annual flow (GWh/yr)"
+      labels = flow_labels,
+      name = legend_title
     ) +
-    link_flow_color_scale(link_spec, brks, "vff_l / vfb_l annual flow (GWh/yr)") +
+    link_flow_color_scale(link_spec, brks, legend_title) +
     coord_sf(ylim = c(-60, 75), expand = FALSE) +
     theme_void() +
     theme(
@@ -430,7 +501,9 @@ plot_combined_flow <- function(edges_sf, scenario_name, link_spec) {
         scenario_name,
         " inter-regional ",
         link_spec$TitleLabel,
-        " combined annual flow from vff_l and vfb_l (GWh/yr, ",
+        " ",
+        title_metric,
+        ", ",
         plot_year,
         ")"
       )
@@ -451,7 +524,8 @@ walk(seq_len(nrow(link_types)), function(i) {
         scenario_name = scenario_name,
         link_pattern = spec$Pattern,
         node_suffix = spec$NodeSuffix,
-        value_spec = value_spec
+        value_spec = value_spec,
+        value_multiplier = link_value_multiplier(spec, value_spec)
       ) %>%
         make_edges_sf()
 
@@ -496,13 +570,14 @@ walk(seq_len(nrow(link_types)), function(i) {
     dir.create(combined_dir, recursive = TRUE, showWarnings = FALSE)
 
     edges_combined_sf <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
-      read_link_value(
-        scenario_name = scenario_name,
-        link_pattern = spec$Pattern,
-        node_suffix = spec$NodeSuffix,
-        value_spec = flow_specs[j, ]
-      )
-    }) %>%
+        read_link_value(
+          scenario_name = scenario_name,
+          link_pattern = spec$Pattern,
+          node_suffix = spec$NodeSuffix,
+          value_spec = flow_specs[j, ],
+          value_multiplier = link_value_multiplier(spec, flow_specs[j, ])
+        )
+      }) %>%
       make_edges_sf()
 
     p <- plot_combined_flow(
@@ -622,15 +697,16 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
     fixed_fill_limits()
 
   vmax <- max(edges_sf$Value, na.rm = TRUE)
-  brks <- 10^seq(0, ceiling(log10(vmax)), by = 1)
-  brks <- brks[brks <= vmax]
-  if (length(brks) == 0) brks <- pretty(c(0, vmax), n = 4)
+  brks <- make_flow_breaks(vmax)
 
   edges_plot_df <- edges_sf %>%
     mutate(Value_plot = log10(1 + Value)) %>%
     st_drop_geometry()
-  edges_line_df <- edges_plot_df %>% filter(Value <= arrow_threshold)
-  edges_arrow_df <- edges_plot_df %>% filter(Value > arrow_threshold)
+  plot_arrow_threshold <- link_arrow_threshold(link_spec)
+  legend_title <- link_flow_legend_title(link_spec, combined = TRUE)
+  flow_labels <- link_flow_labeler(link_spec)(brks)
+  edges_line_df <- edges_plot_df %>% filter(Value <= plot_arrow_threshold)
+  edges_arrow_df <- edges_plot_df %>% filter(Value > plot_arrow_threshold)
 
   ggplot() +
     geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
@@ -658,10 +734,10 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
     scale_linewidth_continuous(
       range = c(0.25, 1.45),
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 1)(brks),
-      name = "vff_l / vfb_l annual flow (GWh/yr)"
+      labels = flow_labels,
+      name = legend_title
     ) +
-    link_flow_color_scale(link_spec, brks, "vff_l / vfb_l annual flow (GWh/yr)") +
+    link_flow_color_scale(link_spec, brks, legend_title) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +
     theme(
@@ -738,13 +814,14 @@ for (i in seq_len(nrow(link_types))) {
     )
 
     edges_combined_sf <- map_dfr(seq_len(nrow(link_flow_specs)), function(j) {
-      read_link_value(
-        scenario_name = scenario_name,
-        link_pattern = link_spec$Pattern,
-        node_suffix = link_spec$NodeSuffix,
-        value_spec = link_flow_specs[j, ]
-      )
-    }) %>%
+        read_link_value(
+          scenario_name = scenario_name,
+          link_pattern = link_spec$Pattern,
+          node_suffix = link_spec$NodeSuffix,
+          value_spec = link_flow_specs[j, ],
+          value_multiplier = link_value_multiplier(link_spec, link_flow_specs[j, ])
+        )
+      }) %>%
       make_edges_sf()
 
     p_overlay <- plot_link_demand_overlay(
