@@ -56,11 +56,19 @@ script_dir <- {
 
 source_trade_region_functions <- function(path = file.path(script_dir, "plot_trade.R")) {
   if (!file.exists(path)) {
-    fallback_path <- file.path("master", "code", "plot_trade.R")
-    if (file.exists(fallback_path)) {
-      path <- fallback_path
+    fallback_paths <- c(
+      file.path(script_dir, "code", "plot_trade.R"),
+      file.path(getwd(), "code", "plot_trade.R"),
+      file.path("master", "code", "plot_trade.R")
+    )
+    existing_fallback <- fallback_paths[file.exists(fallback_paths)][1]
+    if (!is.na(existing_fallback)) {
+      path <- existing_fallback
     } else {
-      stop("Could not find plot_trade.R at: ", path, " or ", fallback_path)
+      stop(
+        "Could not find plot_trade.R at: ",
+        paste(c(path, fallback_paths), collapse = " or ")
+      )
     }
   }
 
