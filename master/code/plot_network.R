@@ -85,6 +85,9 @@ source_trade_region_functions <- function(path = file.path(script_dir, "plot_tra
 source_trade_region_functions()
 region_boundaries <- build_region_boundaries()
 gwh_to_ej <- 3.6e-6
+sampled_days_per_year <- 12
+days_per_year <- 365
+annual_flow_multiplier <- days_per_year / sampled_days_per_year
 
 network_flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -106,7 +109,7 @@ read_h2_link_value <- function(scenario_name, flow_spec) {
     filter(str_detect(L, ".*-H2_.*-H2$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
-    mutate(Value = Value * gwh_to_ej) %>%
+    mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
     filter(Value > 0) %>%
     separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
     mutate(
@@ -136,7 +139,7 @@ read_nh3_trade_value <- function(scenario_name, flow_spec) {
     filter(str_detect(L, "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
-    mutate(Value = Value * gwh_to_ej) %>%
+    mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
     filter(Value > 0)
 
   if (nrow(df_link) == 0) {
@@ -423,7 +426,7 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
   h2_plot_df <- h2_edges_sf %>%
     mutate(Value_plot = log10(1 + Value)) %>%
     st_drop_geometry()
-  arrow_threshold_ej <- arrow_threshold * gwh_to_ej
+  arrow_threshold_ej <- arrow_threshold * annual_flow_multiplier * gwh_to_ej
   h2_line_df <- h2_plot_df %>% filter(Value <= arrow_threshold_ej)
   h2_arrow_df <- h2_plot_df %>% filter(Value > arrow_threshold_ej)
 

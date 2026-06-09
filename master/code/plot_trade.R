@@ -113,8 +113,11 @@ merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 gwh_to_ej <- 3.6e-6
+sampled_days_per_year <- 12
+days_per_year <- 365
+annual_flow_multiplier <- days_per_year / sampled_days_per_year
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
-arrow_threshold <- 10 * gwh_to_ej
+arrow_threshold <- 10 * annual_flow_multiplier * gwh_to_ej
 
 flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -139,7 +142,7 @@ trade_map_specs <- tibble(
     "Biomass power generation"
   ),
   LegendTitle = c(
-    "Ammonia demand (EJ/yr)",
+    "Sec_Ene_Hyd_Amm (EJ/yr)",
     "Biomass power generation (EJ/yr)"
   ),
   FillLow = c("#fbf7ff", "#f7fcf5"),
@@ -229,7 +232,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   df_link <- df_raw %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
-    mutate(Value = Value * gwh_to_ej) %>%
+    mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
     filter(Value > 0)
 
   if (nrow(df_link) == 0) {

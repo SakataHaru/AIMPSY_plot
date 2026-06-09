@@ -32,6 +32,8 @@ prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 data_dir <- "data"
 base_dir <- file.path("output", paste0("global_", substr(date, 1, 6)))
 gwh_to_ej <- 3.6e-6
+sampled_days_per_year <- 12
+days_per_year <- 365
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link_ele","AC",    "AC",            "plasma",
@@ -53,12 +55,22 @@ is_h2_annual_flow <- function(link_spec, value_spec = NULL) {
   link_spec$LinkType == "H2" && (is.null(value_spec) || value_spec$Symbol %in% c("vff_l", "vfb_l"))
 }
 
+is_link_annual_flow <- function(value_spec = NULL) {
+  is.null(value_spec) || value_spec$Symbol %in% c("vff_l", "vfb_l")
+}
+
 link_value_multiplier <- function(link_spec, value_spec) {
-  if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
+  annualize_multiplier <- if (is_link_annual_flow(value_spec)) days_per_year / sampled_days_per_year else 1
+  unit_multiplier <- if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
+
+  annualize_multiplier * unit_multiplier
 }
 
 link_arrow_threshold <- function(link_spec, value_spec = NULL) {
-  if (is_h2_annual_flow(link_spec, value_spec)) arrow_threshold * gwh_to_ej else arrow_threshold
+  annualize_multiplier <- if (is_link_annual_flow(value_spec)) days_per_year / sampled_days_per_year else 1
+  unit_multiplier <- if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
+
+  arrow_threshold * annualize_multiplier * unit_multiplier
 }
 
 link_flow_legend_title <- function(link_spec, value_spec = NULL, combined = FALSE) {
