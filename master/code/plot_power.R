@@ -16,9 +16,9 @@ library(tibble)
 case_name <- "Global softlink model comparison"
 
 aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
-scenario <- 'global_softlink'
-region <- 'global'
-power_dates <- c("PSM-12DAY" = "2605271157")
+scenario <- 'global_softlink_Sc'
+region <- 'Global'
+power_dates <- c("PSM-12DAY" = "2606151735")
 power_main_dirs <- file.path(aimpsy, scenario, region, power_dates, "main")
 names(power_main_dirs) <- names(power_dates)
 energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
@@ -31,9 +31,9 @@ region_list <- c(
   "XAF", "XNF"
 )
 
-target_scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
+target_scenarios <- c("NPi500", "NPi500-ZF2050")
 target_years <- seq(2005, 2050, by = 5)
-base_dir <- file.path("output", paste0("global_", substr(power_dates[["PSM-12DAY"]], 1, 6)))
+base_dir <- file.path("output", "global_260617")
 
 model_color <- c("AIM-Technology" = "black", "PSM-12DAY" = "#e31a1c")
 point_shape <- 16

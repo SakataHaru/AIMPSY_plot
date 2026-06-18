@@ -124,6 +124,8 @@ prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_p
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
+node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
+node_csv <- file.path("data", "AIM_R31_NH3_trade_nodes.csv")
 gwh_to_ej <- 3.6e-6
 time_slice_hours <- 6
 annual_flow_multiplier <- time_slice_hours
@@ -139,6 +141,11 @@ overlay_specs <- tribble(
   ~Carrier, ~Folder,           ~TitleLabel,      ~LinkPattern,
   "NH3",    "plot_trade_nh3",  "NH3 trade",      "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",
   "BMS",    "plot_trade_bio",  "Biomass trade",  "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$"
+)
+
+transmission_capacity_specs <- tribble(
+  ~LinkType, ~Folder,          ~TitleLabel,       ~LinkPattern,       ~NodeSuffix,
+  "AC",      "plot_link_ele",  "AC transmission", ".*-AC_.*-AC$",     "-AC"
 )
 
 read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
@@ -193,10 +200,123 @@ read_combined_transport_values <- function(scenario_name, overlay_spec) {
     select(Symbol, N0, N1, Value)
 }
 
+read_transport_capacity_value <- function(scenario_name, overlay_spec) {
+  capacity_gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(capacity_gdx_path)) {
+    stop("Missing GDX file: ", capacity_gdx_path)
+  }
+
+  df_link <- rgdx.param(capacity_gdx_path, "vfs_l") %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, overlay_spec$LinkPattern)) %>%
+    transmute(L, Value = vfs_l) %>%
+    filter(!is.na(Value), Value > 0)
+
+  if (nrow(df_link) == 0) {
+    return(tibble(Symbol = character(), N0 = character(), N1 = character(), Value = numeric()))
+  }
+
+  link_nodes <- str_match(
+    df_link$L,
+    paste0("^R31-([A-Z0-9]+)-", overlay_spec$Carrier, "_R31-([A-Z0-9]+)-", overlay_spec$Carrier, "$")
+  )
+
+  df_link %>%
+    mutate(
+      Symbol = "vfs_l",
+      N0 = link_nodes[, 2],
+      N1 = link_nodes[, 3]
+    ) %>%
+    select(Symbol, N0, N1, Value)
+}
+
 build_transport_diff_values <- function(scenario_name, base_scenario_name, overlay_spec) {
   scenario_values <- read_combined_transport_values(scenario_name, overlay_spec) %>%
     rename(ScenarioValue = Value)
   base_values <- read_combined_transport_values(base_scenario_name, overlay_spec) %>%
+    rename(BaseValue = Value)
+
+  full_join(scenario_values, base_values, by = c("Symbol", "N0", "N1")) %>%
+    mutate(
+      ScenarioValue = coalesce(ScenarioValue, 0),
+      BaseValue = coalesce(BaseValue, 0),
+      Value = ScenarioValue - BaseValue,
+      AbsValue = abs(Value),
+      Scenario = scenario_name
+    ) %>%
+    filter(AbsValue > 0) %>%
+    select(Scenario, Symbol, N0, N1, Value, AbsValue, ScenarioValue, BaseValue)
+}
+
+build_transport_capacity_diff_values <- function(scenario_name, base_scenario_name, overlay_spec) {
+  scenario_values <- read_transport_capacity_value(scenario_name, overlay_spec) %>%
+    rename(ScenarioValue = Value)
+  base_values <- read_transport_capacity_value(base_scenario_name, overlay_spec) %>%
+    rename(BaseValue = Value)
+
+  full_join(scenario_values, base_values, by = c("Symbol", "N0", "N1")) %>%
+    mutate(
+      ScenarioValue = coalesce(ScenarioValue, 0),
+      BaseValue = coalesce(BaseValue, 0),
+      Value = ScenarioValue - BaseValue,
+      AbsValue = abs(Value),
+      Scenario = scenario_name
+    ) %>%
+    filter(AbsValue > 0) %>%
+    select(Scenario, Symbol, N0, N1, Value, AbsValue, ScenarioValue, BaseValue)
+}
+
+normalize_link_node <- function(node_name, node_suffix) {
+  node_name %>%
+    str_remove_all(fixed(node_suffix)) %>%
+    str_remove("^R31-")
+}
+
+load_link_nodes <- function(primary_path, fallback_csv) {
+  if (file.exists(primary_path)) {
+    st_read(primary_path, quiet = TRUE) %>%
+      st_drop_geometry() %>%
+      transmute(
+        N_PSY = as.character(N_PSY),
+        lon = as.numeric(centroid_x),
+        lat = as.numeric(centroid_y)
+      )
+  } else if (file.exists(fallback_csv)) {
+    read.csv(fallback_csv, stringsAsFactors = FALSE) %>%
+      transmute(
+        N_PSY = str_remove(as.character(N_PSY), "^R31-"),
+        lon = as.numeric(lon),
+        lat = as.numeric(lat)
+      )
+  } else {
+    stop("Missing node coordinate file: ", primary_path, " or ", fallback_csv)
+  }
+}
+
+read_link_capacity_value <- function(scenario_name, capacity_spec) {
+  capacity_gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(capacity_gdx_path)) {
+    stop("Missing GDX file: ", capacity_gdx_path)
+  }
+
+  rgdx.param(capacity_gdx_path, "vfs_l") %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, capacity_spec$LinkPattern)) %>%
+    transmute(L, Value = vfs_l) %>%
+    filter(!is.na(Value), Value > 0) %>%
+    separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
+    mutate(
+      Symbol = "vfs_l",
+      N0 = normalize_link_node(N0, capacity_spec$NodeSuffix),
+      N1 = normalize_link_node(N1, capacity_spec$NodeSuffix)
+    ) %>%
+    select(Symbol, N0, N1, Value)
+}
+
+build_link_capacity_diff_values <- function(scenario_name, base_scenario_name, capacity_spec) {
+  scenario_values <- read_link_capacity_value(scenario_name, capacity_spec) %>%
+    rename(ScenarioValue = Value)
+  base_values <- read_link_capacity_value(base_scenario_name, capacity_spec) %>%
     rename(BaseValue = Value)
 
   full_join(scenario_values, base_values, by = c("Symbol", "N0", "N1")) %>%
@@ -279,6 +399,26 @@ make_transport_diff_edges_sf <- function(df_link, nodes_tbl, sea_routes_sf) {
     geometry = st_geometry(routes_tbl)[route_index],
     crs = st_crs(sea_routes_sf)
   )
+}
+
+make_link_capacity_diff_edges_sf <- function(df_link, nodes_tbl) {
+  edges <- df_link %>%
+    left_join(nodes_tbl, by = c("N0" = "N_PSY")) %>%
+    rename(x0 = lon, y0 = lat) %>%
+    left_join(nodes_tbl, by = c("N1" = "N_PSY")) %>%
+    rename(x1 = lon, y1 = lat) %>%
+    filter(!is.na(x0), !is.na(y0), !is.na(x1), !is.na(y1), AbsValue > 0)
+
+  if (nrow(edges) == 0) {
+    return(st_sf(edges, geometry = st_sfc(crs = 4326)))
+  }
+
+  lines_sfc <- pmap(
+    edges[, c("x0", "y0", "x1", "y1")],
+    ~ st_linestring(matrix(c(..1, ..2, ..3, ..4), ncol = 2, byrow = TRUE))
+  )
+
+  st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
 }
 
 normalize_longitude <- function(x) {
@@ -450,9 +590,19 @@ add_trade_diff_arrows <- function(p, arrow_df) {
   p
 }
 
-plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, overlay_spec) {
+plot_trade_diff_flow <- function(
+  edges_sf,
+  scenario_name,
+  base_scenario_name,
+  overlay_spec,
+  value_label = "annual flow (EJ/yr)",
+  title_metric = "sea trade flow",
+  show_arrows = TRUE,
+  arrow_value_threshold = arrow_threshold,
+  label_accuracy = 0.00001
+) {
   if (nrow(edges_sf) == 0) {
-    warning("No plottable trade differences for scenario: ", scenario_name, " / ", overlay_spec$Carrier)
+    warning("No plottable ", title_metric, " differences for scenario: ", scenario_name, " / ", overlay_spec$Carrier)
     return(NULL)
   }
 
@@ -467,7 +617,7 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
   edges_plot_df <- edges_plot_sf %>%
     st_drop_geometry()
   edges_arrow_sf <- edges_plot_sf %>%
-    filter(AbsValue > arrow_threshold)
+    filter(show_arrows, AbsValue > arrow_value_threshold)
   route_nodes_df <- bind_rows(
     edges_plot_df %>% transmute(N_PSY = N0, lon = x0, lat = y0),
     edges_plot_df %>% transmute(N_PSY = N1, lon = x1, lat = y1)
@@ -494,7 +644,9 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
       lineend = "round"
     )
 
-  p <- add_trade_diff_arrows(p, sea_route_arrow_df)
+  if (show_arrows) {
+    p <- add_trade_diff_arrows(p, sea_route_arrow_df)
+  }
 
   p <- p +
     geom_point(
@@ -513,8 +665,8 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
     scale_linewidth_continuous(
       range = c(0.05, 2.4),
       breaks = log10(1 + brks),
-      labels = scales::label_number(accuracy = 0.00001)(brks),
-      name = paste0("|", scenario_name, " - ", base_scenario_name, "| annual flow (EJ/yr)")
+      labels = scales::label_number(accuracy = label_accuracy)(brks),
+      name = paste0("|", scenario_name, " - ", base_scenario_name, "| ", value_label)
     ) +
     scale_color_gradient2(
       low = "#2166ac",
@@ -522,8 +674,8 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
       high = "#b2182b",
       midpoint = 0,
       limits = c(-vmax, vmax),
-      labels = scales::label_number(accuracy = 0.00001),
-      name = paste0(scenario_name, " - ", base_scenario_name, " annual flow (EJ/yr)")
+      labels = scales::label_number(accuracy = label_accuracy),
+      name = paste0(scenario_name, " - ", base_scenario_name, " ", value_label)
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +
@@ -557,7 +709,85 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
         base_scenario_name,
         " ",
         overlay_spec$TitleLabel,
-        " sea trade flow difference (",
+        " ",
+        title_metric,
+        " difference (",
+        plot_year,
+        ")"
+      )
+    )
+}
+
+plot_link_capacity_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, capacity_spec) {
+  if (nrow(edges_sf) == 0) {
+    warning("No plottable vfs_l capacity differences for scenario: ", scenario_name, " / ", capacity_spec$LinkType)
+    return(NULL)
+  }
+
+  vmax <- max(abs(edges_sf$Value), na.rm = TRUE)
+  if (!is.finite(vmax) || vmax <= 0) return(NULL)
+  brks <- pretty(c(0, vmax), n = 4)
+  brks <- brks[brks > 0 & brks <= vmax]
+  if (length(brks) == 0) brks <- vmax
+
+  edges_plot <- edges_sf %>%
+    mutate(Value_plot = log10(1 + AbsValue))
+
+  ggplot() +
+    geom_sf(data = region_boundaries, fill = "grey96", color = "grey45", linewidth = 0.35) +
+    geom_sf(
+      data = edges_plot,
+      aes(linewidth = Value_plot, color = Value),
+      alpha = 0.88
+    ) +
+    scale_linewidth_continuous(
+      range = c(0.10, 2.4),
+      breaks = log10(1 + brks),
+      labels = scales::label_number(accuracy = 0.01)(brks),
+      name = paste0("|", scenario_name, " - ", base_scenario_name, "| vfs_l capacity (GW)")
+    ) +
+    scale_color_gradient2(
+      low = "#2166ac",
+      mid = "#f7f7f7",
+      high = "#b2182b",
+      midpoint = 0,
+      limits = c(-vmax, vmax),
+      labels = scales::label_number(accuracy = 0.01),
+      name = paste0(scenario_name, " - ", base_scenario_name, " vfs_l capacity (GW)")
+    ) +
+    coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.box = "horizontal",
+      legend.box.spacing = unit(4, "mm"),
+      legend.margin = margin(t = 0, r = 1, b = 0, l = 1, unit = "mm"),
+      legend.background = element_blank(),
+      legend.key.width = unit(16, "mm"),
+      legend.key.height = unit(3, "mm"),
+      legend.title = element_text(size = 7),
+      legend.text = element_text(size = 6.5),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) +
+    guides(
+      color = guide_colorbar(
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        barwidth = unit(60, "mm"),
+        barheight = unit(3, "mm")
+      ),
+      linewidth = "none"
+    ) +
+    labs(
+      title = paste0(
+        scenario_name,
+        " - ",
+        base_scenario_name,
+        " ",
+        capacity_spec$TitleLabel,
+        " vfs_l capacity difference (",
         plot_year,
         ")"
       )
@@ -565,6 +795,7 @@ plot_trade_diff_flow <- function(edges_sf, scenario_name, base_scenario_name, ov
 }
 
 trade_port_nodes_tbl <- load_trade_nodes(searoute_representative_path)
+link_nodes_tbl <- load_link_nodes(node_path, node_csv)
 sea_routes_sf <- load_sea_routes(searoute_path)
 
 for (i in seq_len(nrow(overlay_specs))) {
@@ -587,29 +818,121 @@ for (i in seq_len(nrow(overlay_specs))) {
       base_scenario_name = base_scenario,
       overlay_spec = overlay_spec
     )
-    if (is.null(p_diff)) next
 
-    ggsave(
-      filename = file.path(
-        diff_dir,
-        paste0(
-          "global_",
-          scenario_name,
-          "_minus_",
-          base_scenario,
-          "_vff_l_vfb_l_combined_",
-          overlay_spec$Carrier,
-          "_trade_difference_",
-          plot_year,
-          ".png"
-        )
-      ),
-      plot = p_diff,
-      width = 300,
-      height = 150,
-      units = "mm",
-      dpi = 300,
-      bg = "white"
+    if (!is.null(p_diff)) {
+      ggsave(
+        filename = file.path(
+          diff_dir,
+          paste0(
+            "global_",
+            scenario_name,
+            "_minus_",
+            base_scenario,
+            "_vff_l_vfb_l_combined_",
+            overlay_spec$Carrier,
+            "_trade_difference_",
+            plot_year,
+            ".png"
+          )
+        ),
+        plot = p_diff,
+        width = 300,
+        height = 150,
+        units = "mm",
+        dpi = 300,
+        bg = "white"
+      )
+    }
+
+    edges_capacity_diff_sf <- build_transport_capacity_diff_values(
+      scenario_name = scenario_name,
+      base_scenario_name = base_scenario,
+      overlay_spec = overlay_spec
+    ) %>%
+      make_transport_diff_edges_sf(trade_port_nodes_tbl, sea_routes_sf)
+
+    p_capacity_diff <- plot_trade_diff_flow(
+      edges_sf = edges_capacity_diff_sf,
+      scenario_name = scenario_name,
+      base_scenario_name = base_scenario,
+      overlay_spec = overlay_spec,
+      value_label = "vfs_l capacity (GW)",
+      title_metric = "vfs_l transport capacity",
+      show_arrows = FALSE,
+      label_accuracy = 0.01
     )
+
+    if (!is.null(p_capacity_diff)) {
+      ggsave(
+        filename = file.path(
+          diff_dir,
+          paste0(
+            "global_",
+            scenario_name,
+            "_minus_",
+            base_scenario,
+            "_vfs_l_",
+            overlay_spec$Carrier,
+            "_capacity_difference_",
+            plot_year,
+            ".png"
+          )
+        ),
+        plot = p_capacity_diff,
+        width = 300,
+        height = 150,
+        units = "mm",
+        dpi = 300,
+        bg = "white"
+      )
+    }
+  }
+}
+
+for (i in seq_len(nrow(transmission_capacity_specs))) {
+  capacity_spec <- transmission_capacity_specs[i, ]
+
+  for (scenario_name in scenarios) {
+    diff_dir <- file.path(scenario_analysis_dir, capacity_spec$Folder, paste0("difference_from_", base_scenario))
+    dir.create(diff_dir, recursive = TRUE, showWarnings = FALSE)
+
+    edges_capacity_diff_sf <- build_link_capacity_diff_values(
+      scenario_name = scenario_name,
+      base_scenario_name = base_scenario,
+      capacity_spec = capacity_spec
+    ) %>%
+      make_link_capacity_diff_edges_sf(link_nodes_tbl)
+
+    p_capacity_diff <- plot_link_capacity_diff_flow(
+      edges_sf = edges_capacity_diff_sf,
+      scenario_name = scenario_name,
+      base_scenario_name = base_scenario,
+      capacity_spec = capacity_spec
+    )
+
+    if (!is.null(p_capacity_diff)) {
+      ggsave(
+        filename = file.path(
+          diff_dir,
+          paste0(
+            "global_",
+            scenario_name,
+            "_minus_",
+            base_scenario,
+            "_vfs_l_",
+            capacity_spec$LinkType,
+            "_transmission_capacity_difference_",
+            plot_year,
+            ".png"
+          )
+        ),
+        plot = p_capacity_diff,
+        width = 300,
+        height = 150,
+        units = "mm",
+        dpi = 300,
+        bg = "white"
+      )
+    }
   }
 }
