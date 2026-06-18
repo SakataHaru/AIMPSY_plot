@@ -21,7 +21,7 @@ region <- 'global'
 power_dates <- c("PSM-12DAY" = "2605271157")
 power_main_dirs <- file.path(aimpsy, scenario, region, power_dates, "main")
 names(power_main_dirs) <- names(power_dates)
-energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605262045/main"
+energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
 
 region_list <- c(
   "JPN", "CHN", "IND", "IDN", "KOR", "THA", "MYS", "VNM",

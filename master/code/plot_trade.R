@@ -21,13 +21,13 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 }
 
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink"
-region <- "global"
-date <- "2605271157"
+scenario_group <- "global_softlink_Sc"
+region <- "Global"
+date <- "2606151735"
 plot_year <- 2050
-scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
+scenarios <- c("NPi500", "NPi500-ZF2050")
 
-base_dir <- file.path("output", paste0("global_", substr(date, 1, 6)))
+base_dir <- file.path("output", "global_260617")
 
 build_region_map <- function() {
   tribble(
@@ -113,9 +113,8 @@ merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 gwh_to_ej <- 3.6e-6
-sampled_days_per_year <- 12
-days_per_year <- 365
-annual_flow_multiplier <- days_per_year / sampled_days_per_year
+time_slice_hours <- 6
+annual_flow_multiplier <- time_slice_hours
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
 arrow_threshold <- 10 * annual_flow_multiplier * gwh_to_ej
 
@@ -647,11 +646,16 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NU
 
 trade_port_nodes_tbl <- load_trade_nodes(searoute_representative_path)
 sea_routes_sf <- load_sea_routes(searoute_path)
-trade_map_values <- read_trade_map_values(merged_gdx_path, trade_map_specs)
-if (nrow(trade_map_values) == 0) {
-  warning("No demand map values were read from iamc_gdx: ", merged_gdx_path)
+has_trade_map_data <- file.exists(merged_gdx_path)
+if (has_trade_map_data) {
+  trade_map_values <- read_trade_map_values(merged_gdx_path, trade_map_specs)
+  if (nrow(trade_map_values) == 0) {
+    warning("No demand map values were read from iamc_gdx: ", merged_gdx_path)
+  }
+  trade_map_data <- build_trade_map_data(region_boundaries, trade_map_values, trade_map_specs)
+} else {
+  warning("Skipping demand-trade overlays because merged_output.gdx is missing: ", merged_gdx_path)
 }
-trade_map_data <- build_trade_map_data(region_boundaries, trade_map_values, trade_map_specs)
 
 for (i in seq_len(nrow(overlay_specs))) {
   overlay_spec <- overlay_specs[i, ]
@@ -699,37 +703,39 @@ for (i in seq_len(nrow(overlay_specs))) {
       bg = "white"
     )
 
-    overlay_map_dir <- file.path(base_dir, scenario_name, overlay_spec$Folder, "demand_trade_overlay")
-    dir.create(overlay_map_dir, recursive = TRUE, showWarnings = FALSE)
+    if (has_trade_map_data) {
+      overlay_map_dir <- file.path(base_dir, scenario_name, overlay_spec$Folder, "demand_trade_overlay")
+      dir.create(overlay_map_dir, recursive = TRUE, showWarnings = FALSE)
 
-    p_overlay <- plot_trade_flow(
-      edges_sf = edges_combined_sf,
-      scenario_name = scenario_name,
-      overlay_spec = overlay_spec,
-      map_data = trade_map_data,
-      map_spec = map_spec
-    )
-    if (is.null(p_overlay)) next
+      p_overlay <- plot_trade_flow(
+        edges_sf = edges_combined_sf,
+        scenario_name = scenario_name,
+        overlay_spec = overlay_spec,
+        map_data = trade_map_data,
+        map_spec = map_spec
+      )
+      if (is.null(p_overlay)) next
 
-    ggsave(
-      filename = file.path(
-        overlay_map_dir,
-        paste0(
-          "global_",
-          scenario_name,
-          "_vff_l_vfb_l_combined_",
-          overlay_spec$Carrier,
-          "_demand_trade_overlay_",
-          plot_year,
-          ".png"
-        )
-      ),
-      plot = p_overlay,
-      width = 300,
-      height = 150,
-      units = "mm",
-      dpi = 300,
-      bg = "white"
-    )
+      ggsave(
+        filename = file.path(
+          overlay_map_dir,
+          paste0(
+            "global_",
+            scenario_name,
+            "_vff_l_vfb_l_combined_",
+            overlay_spec$Carrier,
+            "_demand_trade_overlay_",
+            plot_year,
+            ".png"
+          )
+        ),
+        plot = p_overlay,
+        width = 300,
+        height = 150,
+        units = "mm",
+        dpi = 300,
+        bg = "white"
+      )
+    }
   }
 }

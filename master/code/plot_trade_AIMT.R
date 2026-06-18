@@ -110,8 +110,8 @@ region_boundaries <- build_region_boundaries()
 prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_primary")
 main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
 merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
-aimt_trade_gdx_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605262045/gams_output/ghdx_merged/trade/merged.gdx"
-aimt_trade_gdx_fallback_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_first/2605262045/gams_output/gdx_merged/trade_merged.gdx"
+aimt_trade_gdx_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/gams_output/ghdx_merged/trade/merged.gdx"
+aimt_trade_gdx_fallback_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/gams_output/gdx_merged/trade_merged.gdx"
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")

@@ -21,17 +21,17 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 }
 
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink"
-region <- "global"
-date <- "2605271157"
+scenario_group <- "global_softlink_Sc"
+region <- "Global"
+date <- "2606151735"
 plot_year <- 2050
-scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
+scenarios <- c("NPi500", "NPi500-ZF2050")
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 main_dir <- file.path(ddir, "main")
 merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
-base_dir <- file.path("output", paste0("global_", substr(date, 1, 6)))
+base_dir <- file.path("output", "global_260617")
 
 node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
 searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
@@ -85,9 +85,8 @@ source_trade_region_functions <- function(path = file.path(script_dir, "plot_tra
 source_trade_region_functions()
 region_boundaries <- build_region_boundaries()
 gwh_to_ej <- 3.6e-6
-sampled_days_per_year <- 12
-days_per_year <- 365
-annual_flow_multiplier <- days_per_year / sampled_days_per_year
+time_slice_hours <- 6
+annual_flow_multiplier <- time_slice_hours
 
 network_flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -580,8 +579,19 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
 h2_nodes_tbl <- load_h2_nodes(node_path)
 nh3_nodes_tbl <- load_trade_nodes(searoute_representative_path)
 sea_routes_sf <- load_sea_routes(searoute_path)
-h2_demand_values <- read_h2_demand_values(merged_gdx_path)
-h2_demand_map <- build_h2_demand_map_data(h2_demand_values)
+if (file.exists(merged_gdx_path)) {
+  h2_demand_values <- read_h2_demand_values(merged_gdx_path)
+  h2_demand_map <- build_h2_demand_map_data(h2_demand_values)
+} else {
+  warning("Plotting network flows without hydrogen demand map because merged_output.gdx is missing: ", merged_gdx_path)
+  h2_demand_map <- tidyr::expand_grid(
+    Scenario = scenarios,
+    region = region_boundaries$region
+  ) %>%
+    mutate(Value = NA_real_) %>%
+    left_join(region_boundaries %>% select(region, geometry), by = "region") %>%
+    st_as_sf(crs = st_crs(region_boundaries))
+}
 
 for (scenario_name in scenarios) {
   network_dir <- file.path(base_dir, scenario_name, "plot_network")

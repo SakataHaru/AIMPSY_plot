@@ -21,12 +21,12 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 }
 
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink"
-region <- "global"
-date <- "2605271157"
+scenario_group <- "global_softlink_Sc"
+region <- "Global"
+date <- "2606151735"
 plot_year <- 2050
-base_scenario <- "300C"
-scenarios <- c("300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
+base_scenario <- "NPi500"
+scenarios <- c("NPi500-ZF2050")
 
 script_args <- commandArgs(trailingOnly = FALSE)
 script_path <- sub("^--file=", "", script_args[grepl("^--file=", script_args)])
@@ -43,7 +43,7 @@ if (length(script_path) == 0) {
 }
 script_path <- normalizePath(script_path[1])
 project_dir <- normalizePath(file.path(dirname(script_path), ".."))
-base_dir <- file.path(project_dir, "output", paste0("global_", substr(date, 1, 6)))
+base_dir <- file.path(project_dir, "output", "global_260617")
 scenario_analysis_dir <- file.path(base_dir, "scenario_anarysis")
 
 build_region_map <- function() {
@@ -125,7 +125,9 @@ searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PS
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
 gwh_to_ej <- 3.6e-6
-arrow_threshold <- 10 * gwh_to_ej
+time_slice_hours <- 6
+annual_flow_multiplier <- time_slice_hours
+arrow_threshold <- 10 * annual_flow_multiplier * gwh_to_ej
 
 flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -155,7 +157,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   df_link <- df_raw %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
-    mutate(Value = Value * gwh_to_ej) %>%
+    mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
     filter(Value > 0)
 
   if (nrow(df_link) == 0) {
@@ -569,7 +571,7 @@ for (i in seq_len(nrow(overlay_specs))) {
   overlay_spec <- overlay_specs[i, ]
 
   for (scenario_name in scenarios) {
-    diff_dir <- file.path(scenario_analysis_dir, overlay_spec$Folder, "difference_from_300C")
+    diff_dir <- file.path(scenario_analysis_dir, overlay_spec$Folder, paste0("difference_from_", base_scenario))
     dir.create(diff_dir, recursive = TRUE, showWarnings = FALSE)
 
     edges_diff_sf <- build_transport_diff_values(

@@ -20,20 +20,19 @@ sf_use_s2(FALSE)
 #}
 
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink"
-region <- "global"
-date <- "2605271157"
-scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
+scenario_group <- "global_softlink_Sc"
+region <- "Global"
+date <- "2606151735"
+scenarios <- c("NPi500", "NPi500-ZF2050")
 plot_year <- 2050
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 
 data_dir <- "data"
-base_dir <- file.path("output", paste0("global_", substr(date, 1, 6)))
+base_dir <- file.path("output", "global_260617")
 gwh_to_ej <- 3.6e-6
-sampled_days_per_year <- 12
-days_per_year <- 365
+time_slice_hours <- 6
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link_ele","AC",    "AC",            "plasma",
@@ -60,17 +59,17 @@ is_link_annual_flow <- function(value_spec = NULL) {
 }
 
 link_value_multiplier <- function(link_spec, value_spec) {
-  annualize_multiplier <- if (is_link_annual_flow(value_spec)) days_per_year / sampled_days_per_year else 1
+  time_multiplier <- if (is_link_annual_flow(value_spec)) time_slice_hours else 1
   unit_multiplier <- if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
 
-  annualize_multiplier * unit_multiplier
+  time_multiplier * unit_multiplier
 }
 
 link_arrow_threshold <- function(link_spec, value_spec = NULL) {
-  annualize_multiplier <- if (is_link_annual_flow(value_spec)) days_per_year / sampled_days_per_year else 1
+  time_multiplier <- if (is_link_annual_flow(value_spec)) time_slice_hours else 1
   unit_multiplier <- if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
 
-  arrow_threshold * annualize_multiplier * unit_multiplier
+  arrow_threshold * time_multiplier * unit_multiplier
 }
 
 link_flow_legend_title <- function(link_spec, value_spec = NULL, combined = FALSE) {
@@ -656,8 +655,6 @@ read_demand_values <- function(gdx_path, variables) {
     summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
 }
 
-link_demand_values <- read_demand_values(merged_gdx_path, link_demand_specs$DemandVariable)
-
 fixed_fill_limits <- function(values) {
   vmax <- max(values, na.rm = TRUE)
   if (!is.finite(vmax) || vmax <= 0) return(NULL)
@@ -796,76 +793,81 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
     )
 }
 
-link_demand_map_data <- region_boundaries %>%
-  left_join(link_demand_values, by = c("region" = "Region"))
+if (file.exists(merged_gdx_path)) {
+  link_demand_values <- read_demand_values(merged_gdx_path, link_demand_specs$DemandVariable)
+  link_demand_map_data <- region_boundaries %>%
+    left_join(link_demand_values, by = c("region" = "Region"))
 
-link_flow_specs <- value_specs %>% filter(Symbol %in% c("vff_l", "vfb_l"))
+  link_flow_specs <- value_specs %>% filter(Symbol %in% c("vff_l", "vfb_l"))
 
-for (i in seq_len(nrow(link_types))) {
-  link_spec <- link_types[i, ]
-  demand_spec <- link_demand_specs %>% filter(LinkType == link_spec$LinkType)
+  for (i in seq_len(nrow(link_types))) {
+    link_spec <- link_types[i, ]
+    demand_spec <- link_demand_specs %>% filter(LinkType == link_spec$LinkType)
 
-  for (scenario_name in scenarios) {
-    demand_dir <- file.path(base_dir, scenario_name, link_spec$Folder, "demand_map")
-    overlay_dir <- file.path(base_dir, scenario_name, link_spec$Folder, "demand_link_overlay")
-    dir.create(demand_dir, recursive = TRUE, showWarnings = FALSE)
-    dir.create(overlay_dir, recursive = TRUE, showWarnings = FALSE)
+    for (scenario_name in scenarios) {
+      demand_dir <- file.path(base_dir, scenario_name, link_spec$Folder, "demand_map")
+      overlay_dir <- file.path(base_dir, scenario_name, link_spec$Folder, "demand_link_overlay")
+      dir.create(demand_dir, recursive = TRUE, showWarnings = FALSE)
+      dir.create(overlay_dir, recursive = TRUE, showWarnings = FALSE)
 
-    p_demand <- plot_link_demand_map(link_demand_map_data, scenario_name, demand_spec)
-    ggsave(
-      filename = file.path(
-        demand_dir,
-        paste0("global_", scenario_name, "_", demand_spec$DemandVariable, "_demand_map_", plot_year, ".png")
-      ),
-      plot = p_demand,
-      width = 300,
-      height = 130,
-      units = "mm",
-      dpi = 300,
-      bg = "white"
-    )
+      p_demand <- plot_link_demand_map(link_demand_map_data, scenario_name, demand_spec)
+      ggsave(
+        filename = file.path(
+          demand_dir,
+          paste0("global_", scenario_name, "_", demand_spec$DemandVariable, "_demand_map_", plot_year, ".png")
+        ),
+        plot = p_demand,
+        width = 300,
+        height = 130,
+        units = "mm",
+        dpi = 300,
+        bg = "white"
+      )
 
-    edges_combined_sf <- map_dfr(seq_len(nrow(link_flow_specs)), function(j) {
-        read_link_value(
-          scenario_name = scenario_name,
-          link_pattern = link_spec$Pattern,
-          node_suffix = link_spec$NodeSuffix,
-          value_spec = link_flow_specs[j, ],
-          value_multiplier = link_value_multiplier(link_spec, link_flow_specs[j, ])
-        )
-      }) %>%
-      make_edges_sf()
+      edges_combined_sf <- map_dfr(seq_len(nrow(link_flow_specs)), function(j) {
+          read_link_value(
+            scenario_name = scenario_name,
+            link_pattern = link_spec$Pattern,
+            node_suffix = link_spec$NodeSuffix,
+            value_spec = link_flow_specs[j, ],
+            value_multiplier = link_value_multiplier(link_spec, link_flow_specs[j, ])
+          )
+        }) %>%
+        make_edges_sf()
 
-    p_overlay <- plot_link_demand_overlay(
-      map_data = link_demand_map_data,
-      edges_sf = edges_combined_sf,
-      scenario_name = scenario_name,
-      link_spec = link_spec,
-      demand_spec = demand_spec
-    )
-    if (is.null(p_overlay)) next
+      p_overlay <- plot_link_demand_overlay(
+        map_data = link_demand_map_data,
+        edges_sf = edges_combined_sf,
+        scenario_name = scenario_name,
+        link_spec = link_spec,
+        demand_spec = demand_spec
+      )
+      if (is.null(p_overlay)) next
 
-    ggsave(
-      filename = file.path(
-        overlay_dir,
-        paste0(
-          "global_",
-          scenario_name,
-          "_",
-          demand_spec$DemandVariable,
-          "_vff_l_vfb_l_combined_",
-          link_spec$FileTag,
-          "_demand_link_overlay_",
-          plot_year,
-          ".png"
-        )
-      ),
-      plot = p_overlay,
-      width = 300,
-      height = 150,
-      units = "mm",
-      dpi = 300,
-      bg = "white"
-    )
+      ggsave(
+        filename = file.path(
+          overlay_dir,
+          paste0(
+            "global_",
+            scenario_name,
+            "_",
+            demand_spec$DemandVariable,
+            "_vff_l_vfb_l_combined_",
+            link_spec$FileTag,
+            "_demand_link_overlay_",
+            plot_year,
+            ".png"
+          )
+        ),
+        plot = p_overlay,
+        width = 300,
+        height = 150,
+        units = "mm",
+        dpi = 300,
+        bg = "white"
+      )
+    }
   }
+} else {
+  warning("Skipping demand maps and demand-link overlays because merged_output.gdx is missing: ", merged_gdx_path)
 }
