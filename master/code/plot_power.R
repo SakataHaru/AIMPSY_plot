@@ -6,6 +6,19 @@ library(ggplot2)
 library(gdxrrw)
 library(tibble)
 
+script_args <- commandArgs(trailingOnly = FALSE)
+script_path <- sub("^--file=", "", script_args[grepl("^--file=", script_args)])
+script_dir <- if (length(script_path) > 0) {
+  dirname(normalizePath(script_path[[1]], winslash = "/", mustWork = FALSE))
+} else {
+  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+}
+project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
+  script_dir
+} else {
+  normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = FALSE)
+}
+
 #for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 #  if (dir.exists(gams_sys_dir)) {
 #    igdx(gams_sys_dir)
@@ -18,7 +31,7 @@ case_name <- "Global softlink model comparison"
 aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
 scenario <- 'global_softlink_Sc'
 region <- 'Global'
-power_dates <- c("PSM-12DAY" = "2606151735")
+power_dates <- c("PSM" = "2606171718")
 power_main_dirs <- file.path(aimpsy, scenario, region, power_dates, "main")
 names(power_main_dirs) <- names(power_dates)
 energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
@@ -33,9 +46,9 @@ region_list <- c(
 
 target_scenarios <- c("NPi500", "NPi500-ZF2050")
 target_years <- seq(2005, 2050, by = 5)
-base_dir <- file.path("output", "global_260617")
+base_dir <- file.path(project_dir, "output", "global_260617")
 
-model_color <- c("AIM-Technology" = "black", "PSM-12DAY" = "#e31a1c")
+model_color <- c("AIM-Technology" = "black", "PSM" = "#e31a1c")
 point_shape <- 16
 
 MyTheme <- theme_bw() +
@@ -89,7 +102,7 @@ read_iamc_gdx <- function(main_dir, model_name) {
 
 df_base_region <- bind_rows(
   read_iamc_gdx(energy_main_dir, "AIM-Technology"),
-  read_iamc_gdx(power_main_dirs[["PSM-12DAY"]], "PSM-12DAY")
+  read_iamc_gdx(power_main_dirs[["PSM"]], "PSM")
 ) %>%
   filter(
     Region %in% region_list,
@@ -318,7 +331,7 @@ for (scenario_name in target_scenarios) {
     filter(
       Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
       Scenario == scenario_name,
-      Model == "PSM-12DAY"
+      Model == "PSM"
     ) %>%
     mutate(
       LossType = recode(
@@ -416,7 +429,7 @@ for (scenario_name in target_scenarios) {
       filter(
         Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
         Scenario == scenario_name,
-        Model == "PSM-12DAY"
+        Model == "PSM"
       ) %>%
       select(Scenario, Region, Year, Model, Case, Variable, SplitLoss = Value) %>%
       inner_join(d_denominator, by = join_keys) %>%
@@ -828,7 +841,7 @@ save_scenario_line_plot(
   folder = "plot_hydrogen"
 )
 
-power_model_label <- c("AIM-Technology" = "AIM", "PSM-12DAY" = "PSM")
+power_model_label <- c("AIM-Technology" = "AIM", "PSM" = "PSM")
 scenario_power_x_axis <- expand_grid(
   Scenario = target_scenarios,
   Model = names(model_color)

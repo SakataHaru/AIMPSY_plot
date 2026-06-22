@@ -6,14 +6,27 @@ library(ggplot2)
 library(gdxrrw)
 library(tibble)
 
-source(file.path("code", "dataframe.R"))
+script_args <- commandArgs(trailingOnly = FALSE)
+script_path <- sub("^--file=", "", script_args[grepl("^--file=", script_args)])
+script_dir <- if (length(script_path) > 0) {
+  dirname(normalizePath(script_path[[1]], winslash = "/", mustWork = FALSE))
+} else {
+  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+}
+project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
+  script_dir
+} else {
+  normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = FALSE)
+}
+
+source(file.path(project_dir, "code", "dataframe.R"))
 
 case_name <- "AIM-Technology final energy demand scenario comparison"
 
 energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
 target_scenarios <- c("NPi500", "NPi500-ZF2050")
 plot_year <- 2050
-base_dir <- file.path("output", "global_260617")
+base_dir <- file.path(project_dir, "output", "global_260617")
 out_dir <- file.path(base_dir, "scenario_anarysis", "plot_finene")
 
 region_list <- c(

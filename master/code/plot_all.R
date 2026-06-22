@@ -73,12 +73,16 @@ read_iamc_gdx <- function(main_dir, model_name) {
     filter(!is.na(Value))
 }
 
-add_world_rows <- function(df, regions) {
+add_world_rows <- function(df, regions, replace_existing = FALSE) {
   world <- df %>%
     filter(Region %in% regions) %>%
     group_by(Scenario, Variable, Year, Model) %>%
     summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
     mutate(Region = "World")
+
+  if (replace_existing) {
+    df <- df %>% filter(Region != "World")
+  }
 
   bind_rows(df, world)
 }
@@ -87,9 +91,13 @@ aimt_data <- read_iamc_gdx(aimt_main_dir, "AIM-Technology")
 psm_data <- read_iamc_gdx(psm_main_dir, "PSM")
 
 region_base <- setdiff(region_list, "World")
-all_data <- bind_rows(aimt_data, psm_data) %>%
+aimt_plot_data <- aimt_data %>%
+  filter(Scenario %in% target_scenarios)
+psm_plot_data <- psm_data %>%
   filter(Scenario %in% target_scenarios) %>%
-  add_world_rows(region_base) %>%
+  add_world_rows(region_base, replace_existing = TRUE)
+
+all_data <- bind_rows(aimt_plot_data, psm_plot_data) %>%
   filter(Region %in% region_list) %>%
   mutate(
     Scenario = factor(Scenario, levels = target_scenarios),
@@ -254,7 +262,7 @@ fuel_specs <- tribble(
   ~Fuel, ~SupplyVariables, ~DemandVariables, ~LinkPattern, ~NodeSuffixPattern, ~Color,
   "Hydrogen", list("Sec_Ene_Hyd"), list("Fin_Ene_Hyd"), ".*-H2_.*-H2$", "-H2$", "#8ecae6",
   "Ammonia", list("Sec_Ene_Hyd_Amm"), list("Fin_Ene_Hyd_Amm"), "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$", "-NH3$", "#ffb703",
-  "Synfuel", list("Sec_Ene_Hyd_Syn"), list(c("Fin_Ene_Liq_Hyd_syn", "Fin_Ene_Gas_Hyd_syn")), ".*-(SYN|SYF|LFS|EFS)_.*-(SYN|SYF|LFS|EFS)$", "-(SYN|SYF|LFS|EFS)$", "#c77dff"
+  "Synfuel", list("Sec_Ene_Hyd_Syn"), list("Fin_Ene_Liq_Hyd_syn"), ".*-(SYN|SYF|LFS|EFS)_.*-(SYN|SYF|LFS|EFS)$", "-(SYN|SYF|LFS|EFS)$", "#c77dff"
 )
 fuel_levels <- fuel_specs$Fuel
 fuel_colors <- setNames(fuel_specs$Color, fuel_specs$Fuel)
