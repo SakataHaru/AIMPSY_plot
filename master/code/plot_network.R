@@ -23,9 +23,9 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink_Sc"
 region <- "Global"
-date <- "2606151735"
+date <- "2606211322"
 plot_year <- 2050
-scenarios <- c("NPi500", "NPi500-ZF2050")
+scenarios <- c("NPi500-ZF2050")
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
@@ -39,8 +39,9 @@ searoute_path <- file.path(searoute_dir, "searoute.geojson")
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
 
 arrow_threshold <- 10
-h2_color <- "#2b8cbe"
-nh3_color <- "#c51b7d"
+h2_color <- "#018571"
+nh3_color <- "#b2186b"
+syf_color <- "#2166ac"
 
 script_dir <- {
   file_arg <- commandArgs(trailingOnly = FALSE) %>%
@@ -146,6 +147,43 @@ read_nh3_trade_value <- function(scenario_name, flow_spec) {
   }
 
   link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3_R31-([A-Z0-9]+)-NH3$")
+
+  df_link %>%
+    mutate(
+      Scenario = scenario_name,
+      Symbol = value_symbol,
+      N0 = link_nodes[, 2],
+      N1 = link_nodes[, 3],
+      N0_plot = if (direction == "backward") N1 else N0,
+      N1_plot = if (direction == "backward") N0 else N1,
+      N0 = N0_plot,
+      N1 = N1_plot
+    ) %>%
+    select(-N0_plot, -N1_plot)
+}
+
+read_syf_trade_value <- function(scenario_name, flow_spec) {
+  gdx_path <- file.path(prm_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(gdx_path)) {
+    stop("Missing GDX file: ", gdx_path)
+  }
+
+  value_symbol <- flow_spec$Symbol
+  direction <- flow_spec$Direction
+
+  df_link <- rgdx.param(gdx_path, value_symbol) %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, "^R31-[A-Z0-9]+-SYF_R31-[A-Z0-9]+-SYF$")) %>%
+    group_by(L) %>%
+    summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
+    filter(Value > 0)
+
+  if (nrow(df_link) == 0) {
+    return(tibble(L = character(), Value = numeric(), Scenario = character(), Symbol = character(), N0 = character(), N1 = character()))
+  }
+
+  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-SYF_R31-([A-Z0-9]+)-SYF$")
 
   df_link %>%
     mutate(
@@ -333,7 +371,17 @@ route_coordinates_df <- function(edge_sf, route_id) {
 }
 
 make_sea_route_df <- function(edges_sf) {
-  if (nrow(edges_sf) == 0) return(tibble())
+  if (nrow(edges_sf) == 0) {
+    return(tibble(
+      route_id = character(),
+      segment_id = character(),
+      coord_order = integer(),
+      x = numeric(),
+      y = numeric(),
+      Value = numeric(),
+      Value_plot = numeric()
+    ))
+  }
 
   map_dfr(seq_len(nrow(edges_sf)), function(i) {
     edge_row <- edges_sf[i, ]
@@ -390,9 +438,18 @@ terminal_arrow_segment <- function(route_segment) {
 }
 
 make_nh3_arrow_df <- function(edges_sf) {
-  if (nrow(edges_sf) == 0) return(tibble())
+  empty_arrow_df <- tibble(
+    x = numeric(),
+    y = numeric(),
+    xend = numeric(),
+    yend = numeric(),
+    Value = numeric(),
+    Value_plot = numeric()
+  )
 
-  map_dfr(seq_len(nrow(edges_sf)), function(i) {
+  if (nrow(edges_sf) == 0) return(empty_arrow_df)
+
+  arrow_df <- map_dfr(seq_len(nrow(edges_sf)), function(i) {
     edge_row <- edges_sf[i, ]
     edge_attr <- st_drop_geometry(edge_row)
     route_id <- paste(edge_attr$Scenario, edge_attr$Symbol, edge_attr$N0, edge_attr$N1, i, sep = "__")
@@ -414,10 +471,12 @@ make_nh3_arrow_df <- function(edges_sf) {
       mutate(Value = edge_attr$Value, Value_plot = edge_attr$Value_plot)
   }) %>%
     arrange(Value)
+
+  if (nrow(arrow_df) == 0) empty_arrow_df else arrow_df
 }
 
-plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scenario_name) {
-  if (nrow(h2_edges_sf) == 0 && nrow(nh3_edges_sf) == 0) {
+plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, syf_edges_sf, h2_demand_map, scenario_name) {
+  if (nrow(h2_edges_sf) == 0 && nrow(nh3_edges_sf) == 0 && nrow(syf_edges_sf) == 0) {
     warning("No plottable network links for scenario: ", scenario_name)
     return(NULL)
   }
@@ -425,15 +484,31 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
   h2_plot_df <- h2_edges_sf %>%
     mutate(Value_plot = log10(1 + Value)) %>%
     st_drop_geometry()
+  if (nrow(h2_plot_df) > 0) {
+    h2_color_scale <- scales::col_numeric(
+      palette = c("#c7eae5", h2_color),
+      domain = range(h2_plot_df$Value_plot, na.rm = TRUE)
+    )
+    h2_plot_df <- h2_plot_df %>%
+      mutate(FlowColor = h2_color_scale(Value_plot))
+  } else {
+    h2_plot_df <- h2_plot_df %>%
+      mutate(FlowColor = h2_color)
+  }
+
   arrow_threshold_ej <- arrow_threshold * annual_flow_multiplier * gwh_to_ej
-  h2_line_df <- h2_plot_df %>% filter(Value <= arrow_threshold_ej)
-  h2_arrow_df <- h2_plot_df %>% filter(Value > arrow_threshold_ej)
 
   nh3_plot_sf <- nh3_edges_sf %>%
     mutate(Value_plot = log10(1 + Value))
   nh3_route_df <- make_sea_route_df(nh3_plot_sf)
   nh3_arrow_df <- make_nh3_arrow_df(nh3_plot_sf %>% filter(Value > arrow_threshold_ej))
-  nh3_nodes_df <- nh3_plot_sf %>%
+
+  syf_plot_sf <- syf_edges_sf %>%
+    mutate(Value_plot = log10(1 + Value))
+  syf_route_df <- make_sea_route_df(syf_plot_sf)
+  syf_arrow_df <- make_nh3_arrow_df(syf_plot_sf %>% filter(Value > arrow_threshold_ej))
+
+  trade_nodes_df <- bind_rows(nh3_plot_sf, syf_plot_sf) %>%
     st_drop_geometry() %>%
     transmute(N0, N1, x0, y0, x1, y1) %>%
     { bind_rows(
@@ -442,64 +517,96 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
     ) } %>%
     distinct(N_PSY, lon, lat)
 
-  brks <- log_value_breaks(c(h2_edges_sf$Value, nh3_edges_sf$Value))
-  nh3_brks <- log_value_breaks(nh3_edges_sf$Value)
+  brks <- log_value_breaks(c(h2_edges_sf$Value, nh3_edges_sf$Value, syf_edges_sf$Value))
 
   plot_map_data <- h2_demand_map %>%
     filter(Scenario == scenario_name)
-  fill_limits <- fixed_fill_limits(h2_demand_map$Value)
+  carrier_legend_df <- tibble(
+    Carrier = factor(c("Hydrogen pipeline", "Ammonia sea trade", "Synfuel sea trade"),
+                     levels = c("Hydrogen pipeline", "Ammonia sea trade", "Synfuel sea trade")),
+    x = 0,
+    y = 0
+  )
 
   ggplot() +
-    geom_sf(data = plot_map_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +
+    geom_sf(data = plot_map_data, fill = "grey96", color = "grey45", linewidth = 0.25) +
     geom_segment(
-      data = h2_line_df,
+      data = h2_plot_df,
       aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot),
-      color = h2_color,
-      alpha = 0.86,
+      color = h2_plot_df$FlowColor,
+      alpha = 0.96,
+      lineend = "round"
+    ) +
+    geom_path(
+      data = syf_route_df,
+      aes(x = x, y = y, group = segment_id),
+      color = "white",
+      linewidth = 0.65,
+      alpha = 0.7,
+      lineend = "round",
+      show.legend = FALSE
+    ) +
+    geom_path(
+      data = syf_route_df,
+      aes(x = x, y = y, group = segment_id, linewidth = Value_plot),
+      color = syf_color,
+      alpha = 0.96,
       lineend = "round"
     ) +
     geom_segment(
-      data = h2_arrow_df,
-      aes(x = x0, y = y0, xend = x1, yend = y1, linewidth = Value_plot),
-      color = h2_color,
-      alpha = 0.86,
+      data = syf_arrow_df,
+      aes(x = x, y = y, xend = xend, yend = yend),
+      color = "white",
+      linewidth = 1.35,
+      alpha = 0.78,
       lineend = "round",
-      arrow = arrow(length = unit(1.55, "mm"), type = "closed")
+      arrow = arrow(length = unit(2.15, "mm"), type = "closed"),
+      show.legend = FALSE
+    ) +
+    geom_segment(
+      data = syf_arrow_df,
+      aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot),
+      color = syf_color,
+      alpha = 0.98,
+      lineend = "round",
+      arrow = arrow(length = unit(1.95, "mm"), type = "closed")
     ) +
     geom_path(
       data = nh3_route_df,
       aes(x = x, y = y, group = segment_id),
       color = "white",
-      linewidth = 0.35,
-      alpha = 0.55,
+      linewidth = 0.65,
+      alpha = 0.7,
       lineend = "round",
       show.legend = FALSE
     ) +
     geom_path(
       data = nh3_route_df,
-      aes(x = x, y = y, group = segment_id, linewidth = Value_plot, color = Value_plot),
-      alpha = 0.84,
+      aes(x = x, y = y, group = segment_id, linewidth = Value_plot),
+      color = nh3_color,
+      alpha = 0.96,
       lineend = "round"
     ) +
     geom_segment(
       data = nh3_arrow_df,
       aes(x = x, y = y, xend = xend, yend = yend),
       color = "white",
-      linewidth = 0.95,
-      alpha = 0.68,
+      linewidth = 1.35,
+      alpha = 0.78,
       lineend = "round",
       arrow = arrow(length = unit(2.15, "mm"), type = "closed"),
       show.legend = FALSE
     ) +
     geom_segment(
       data = nh3_arrow_df,
-      aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot, color = Value_plot),
-      alpha = 0.88,
+      aes(x = x, y = y, xend = xend, yend = yend, linewidth = Value_plot),
+      color = nh3_color,
+      alpha = 0.98,
       lineend = "round",
       arrow = arrow(length = unit(1.95, "mm"), type = "closed")
     ) +
     geom_point(
-      data = nh3_nodes_df,
+      data = trade_nodes_df,
       aes(x = lon, y = lat),
       shape = 21,
       size = 2.8,
@@ -509,26 +616,26 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
       alpha = 0.95,
       inherit.aes = FALSE
     ) +
-    scale_fill_gradient(
-      low = "#f7f7f7",
-      high = "#252525",
-      limits = fill_limits,
-      na.value = "grey92",
-      labels = scales::label_number(accuracy = 0.01),
-      name = "Hydrogen demand (EJ/yr)"
+    geom_point(
+      data = carrier_legend_df,
+      aes(x = x, y = y, color = Carrier),
+      alpha = 0,
+      inherit.aes = FALSE,
+      show.legend = TRUE
     ) +
     scale_linewidth_continuous(
-      range = c(0.08, 2.2),
+      range = c(0.25, 4.4),
       breaks = log10(1 + brks),
       labels = scales::label_number(accuracy = 0.00001)(brks),
       name = "Network flow (EJ/yr)"
     ) +
-    scale_color_gradient(
-      low = "#e0ecf4",
-      high = "#4a1486",
-      breaks = log10(1 + nh3_brks),
-      labels = scales::label_number(accuracy = 0.00001)(nh3_brks),
-      name = "NH3 sea trade (EJ/yr)"
+    scale_color_manual(
+      values = c(
+        "Hydrogen pipeline" = h2_color,
+        "Ammonia sea trade" = nh3_color,
+        "Synfuel sea trade" = syf_color
+      ),
+      name = "Carrier"
     ) +
     coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     theme_void() +
@@ -546,30 +653,22 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
       plot.title = element_text(hjust = 0.5, size = 12)
     ) +
     guides(
-      fill = guide_colorbar(
-        direction = "horizontal",
-        title.position = "top",
-        title.hjust = 0.5,
-        barwidth = unit(48, "mm"),
-        barheight = unit(3, "mm")
-      ),
       linewidth = guide_legend(
         direction = "horizontal",
         title.position = "top",
         title.hjust = 0.5
       ),
-      color = guide_colorbar(
+      color = guide_legend(
         direction = "horizontal",
         title.position = "top",
         title.hjust = 0.5,
-        barwidth = unit(48, "mm"),
-        barheight = unit(3, "mm")
+        override.aes = list(alpha = 1, size = 3)
       )
     ) +
     labs(
       title = paste0(
         scenario_name,
-        " hydrogen network, ammonia sea trade, and hydrogen demand (",
+        " hydrogen, ammonia, and synfuel network flows (",
         plot_year,
         ")"
       )
@@ -579,19 +678,12 @@ plot_network_overlay <- function(h2_edges_sf, nh3_edges_sf, h2_demand_map, scena
 h2_nodes_tbl <- load_h2_nodes(node_path)
 nh3_nodes_tbl <- load_trade_nodes(searoute_representative_path)
 sea_routes_sf <- load_sea_routes(searoute_path)
-if (file.exists(merged_gdx_path)) {
-  h2_demand_values <- read_h2_demand_values(merged_gdx_path)
-  h2_demand_map <- build_h2_demand_map_data(h2_demand_values)
-} else {
-  warning("Plotting network flows without hydrogen demand map because merged_output.gdx is missing: ", merged_gdx_path)
-  h2_demand_map <- tidyr::expand_grid(
-    Scenario = scenarios,
-    region = region_boundaries$region
-  ) %>%
-    mutate(Value = NA_real_) %>%
-    left_join(region_boundaries %>% select(region, geometry), by = "region") %>%
-    st_as_sf(crs = st_crs(region_boundaries))
-}
+h2_demand_map <- tidyr::expand_grid(
+  Scenario = scenarios,
+  region = region_boundaries$region
+) %>%
+  left_join(region_boundaries %>% select(region, geometry), by = "region") %>%
+  st_as_sf(crs = st_crs(region_boundaries))
 
 for (scenario_name in scenarios) {
   network_dir <- file.path(base_dir, scenario_name, "plot_network")
@@ -607,9 +699,15 @@ for (scenario_name in scenarios) {
   }) %>%
     make_nh3_edges_sf(nh3_nodes_tbl, sea_routes_sf)
 
+  syf_edges_sf <- map_dfr(seq_len(nrow(network_flow_specs)), function(i) {
+    read_syf_trade_value(scenario_name, network_flow_specs[i, ])
+  }) %>%
+    make_nh3_edges_sf(nh3_nodes_tbl, sea_routes_sf)
+
   p <- plot_network_overlay(
     h2_edges_sf = h2_edges_sf,
     nh3_edges_sf = nh3_edges_sf,
+    syf_edges_sf = syf_edges_sf,
     h2_demand_map = h2_demand_map,
     scenario_name = scenario_name
   )
@@ -618,7 +716,7 @@ for (scenario_name in scenarios) {
   ggsave(
     filename = file.path(
       network_dir,
-      paste0("global_", scenario_name, "_h2_nh3_network_overlay_", plot_year, ".png")
+      paste0("global_", scenario_name, "_h2_nh3_syf_network_overlay_", plot_year, ".png")
     ),
     plot = p,
     width = 300,
