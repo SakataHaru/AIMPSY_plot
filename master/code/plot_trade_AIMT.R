@@ -23,7 +23,7 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink"
 region <- "global"
-date <- "2605271157"
+date <- "2606111707"
 plot_year <- 2050
 scenarios <- c("300C", "300C-LimCCS", "300C-LimCCS_bio", "300C-H2low", "300C-extremeH2")
 

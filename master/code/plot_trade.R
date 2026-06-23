@@ -13,6 +13,17 @@ library(rnaturalearthdata)
 
 sf_use_s2(FALSE)
 
+read_gdx_param <- if (exists("trading_read_gdx_param", inherits = TRUE)) {
+  trading_read_gdx_param
+} else {
+  function(gdx_path, symbol) {
+    if (!file.exists(gdx_path)) {
+      stop("Missing GDX file: ", gdx_path)
+    }
+    rgdx.param(gdx_path, symbol)
+  }
+}
+
 for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
   if (dir.exists(gams_sys_dir)) {
     igdx(gams_sys_dir)
@@ -20,14 +31,14 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
   }
 }
 
-aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink_Sc"
 region <- "Global"
 date <- "2606151735"
 plot_year <- 2050
 scenarios <- c("NPi500", "NPi500-ZF2050")
 
-base_dir <- file.path("output", "global_260617")
+base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_260617")
 
 build_region_map <- function() {
   tribble(
@@ -103,14 +114,22 @@ build_region_boundaries <- function() {
     st_set_crs(4326)
 }
 
-region_boundaries <- build_region_boundaries()
+region_boundaries <- if (exists("trading_region_boundaries", inherits = TRUE)) {
+  trading_region_boundaries
+} else {
+  build_region_boundaries()
+}
 
 # Maritime trade links --------------------------------------------------------
 
 prm_dir <- file.path(aimpsy, scenario_group, region, date, "gams_output", "gdx_primary")
 main_dir <- file.path(aimpsy, scenario_group, region, date, "main")
 merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
-searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
+searoute_dir <- if (exists("trading_searoute_dir", inherits = TRUE)) {
+  trading_searoute_dir
+} else {
+  "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
+}
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 gwh_to_ej <- 3.6e-6
 time_slice_hours <- 6
@@ -158,7 +177,7 @@ read_trade_map_values <- function(gdx_path, map_specs) {
     unnest(DemandVariables) %>%
     rename(Variable = DemandVariables)
 
-  rgdx.param(gdx_path, "iamc_gdx") %>%
+  read_gdx_param(gdx_path, "iamc_gdx") %>%
     transmute(
       Scenario = as.character(Sc),
       Region = str_remove(as.character(Sr), "^R31-"),
@@ -224,7 +243,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
   value_symbol <- flow_spec$Symbol
   direction <- flow_spec$Direction
 
-  df_raw <- rgdx.param(flow_gdx_path, value_symbol) %>%
+  df_raw <- read_gdx_param(flow_gdx_path, value_symbol) %>%
     mutate(across(where(is.factor), as.character)) %>%
     filter(str_detect(L, overlay_spec$LinkPattern))
 
@@ -644,8 +663,16 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NU
     )
 }
 
-trade_port_nodes_tbl <- load_trade_nodes(searoute_representative_path)
-sea_routes_sf <- load_sea_routes(searoute_path)
+trade_port_nodes_tbl <- if (exists("trading_trade_port_nodes_tbl", inherits = TRUE)) {
+  trading_trade_port_nodes_tbl
+} else {
+  load_trade_nodes(searoute_representative_path)
+}
+sea_routes_sf <- if (exists("trading_sea_routes_sf", inherits = TRUE)) {
+  trading_sea_routes_sf
+} else {
+  load_sea_routes(searoute_path)
+}
 has_trade_map_data <- file.exists(merged_gdx_path)
 if (has_trade_map_data) {
   trade_map_values <- read_trade_map_values(merged_gdx_path, trade_map_specs)

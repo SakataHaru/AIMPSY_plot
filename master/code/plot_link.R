@@ -12,6 +12,17 @@ library(rnaturalearthdata)
 
 sf_use_s2(FALSE)
 
+read_gdx_param <- if (exists("trading_read_gdx_param", inherits = TRUE)) {
+  trading_read_gdx_param
+} else {
+  function(gdx_path, symbol) {
+    if (!file.exists(gdx_path)) {
+      stop("Missing GDX file: ", gdx_path)
+    }
+    rgdx.param(gdx_path, symbol)
+  }
+}
+
 #for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 #  if (dir.exists(gams_sys_dir)) {
 #    igdx(gams_sys_dir)
@@ -19,18 +30,18 @@ sf_use_s2(FALSE)
 #  }
 #}
 
-aimpsy <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink_Sc"
 region <- "Global"
-date <- "2606151735"
+date <- "2606171718"
 scenarios <- c("NPi500", "NPi500-ZF2050")
 plot_year <- 2050
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 
-data_dir <- "data"
-base_dir <- file.path("output", "global_260617")
+data_dir <- if (exists("trading_data_dir", inherits = TRUE)) trading_data_dir else "data"
+base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_260617")
 gwh_to_ej <- 3.6e-6
 time_slice_hours <- 6
 link_types <- tribble(
@@ -273,12 +284,22 @@ build_region_boundaries <- function() {
     st_set_crs(4326)
 }
 
-region_boundaries <- build_region_boundaries()
+region_boundaries <- if (exists("trading_link_region_boundaries", inherits = TRUE)) {
+  trading_link_region_boundaries
+} else {
+  build_region_boundaries()
+}
 
-node_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
+node_path <- if (exists("trading_node_geojson_path", inherits = TRUE)) {
+  trading_node_geojson_path
+} else {
+  "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
+}
 node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
 
-if (file.exists(node_path)) {
+if (exists("trading_link_nodes_tbl", inherits = TRUE)) {
+  nodes_tbl <- trading_link_nodes_tbl
+} else if (file.exists(node_path)) {
   nodes_tbl <- st_read(node_path, quiet = TRUE) %>%
     st_drop_geometry() %>%
     transmute(
@@ -313,7 +334,7 @@ read_link_value <- function(scenario_name, link_pattern, node_suffix, value_spec
   aggregation <- value_spec$Aggregation
   direction <- value_spec$Direction
 
-  df_raw <- rgdx.param(gdx_path, value_symbol) %>%
+  df_raw <- read_gdx_param(gdx_path, value_symbol) %>%
     mutate(across(where(is.factor), as.character)) %>%
     filter(str_detect(L, link_pattern))
 
@@ -636,7 +657,7 @@ read_demand_values <- function(gdx_path, variables) {
     stop("Missing GDX file: ", gdx_path)
   }
 
-  rgdx.param(gdx_path, "iamc_gdx") %>%
+  read_gdx_param(gdx_path, "iamc_gdx") %>%
     transmute(
       Scenario = as.character(Sc),
       Region = str_remove(as.character(Sr), "^R31-"),
