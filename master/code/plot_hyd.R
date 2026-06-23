@@ -28,7 +28,7 @@
   psm_primary_dir <- file.path(dirname(psm_main_dir), "gams_output", "gdx_primary")
   r272_map_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/AIMPSY-master/data/set/M_R272.csv"
 
-  target_scenarios <- c("NPi500", "NPi500-ZF2050")
+  target_scenarios <- c("NPi500-ZF2050")
   plot_year <- 2050
   time_slice_hours <- 6
   gwh_to_ej <- 3.6e-6
@@ -52,15 +52,24 @@
     }
 
     rgdx.param(gdx_path, "iamc_gdx") %>%
+      drop_r31_region_rows() %>%
       transmute(
         Scenario = as.character(Sc),
-        Region = str_remove(as.character(Sr), "^R31-"),
+        Region = RawRegion,
         Variable = as.character(Sv),
         Year = as.numeric(as.character(Y5)),
         Value = suppressWarnings(as.numeric(as.character(iamc_gdx))),
         Model = model_name
       ) %>%
-      filter(!is.na(Value))
+      filter(!is.na(Value)) %>%
+      group_by(Scenario, Region, Variable, Year, Model) %>%
+      summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+  }
+
+  drop_r31_region_rows <- function(df) {
+    df %>%
+      mutate(RawRegion = as.character(Sr)) %>%
+      filter(!str_detect(RawRegion, "^R31-"))
   }
 
   add_world_rows <- function(df, regions, replace_existing = FALSE) {
@@ -144,9 +153,21 @@
 
   fuel_specs <- tribble(
     ~Fuel, ~SupplyVariables, ~DemandVariables, ~LinkPattern, ~NodeSuffixPattern,
-    "Ammonia", list("Sec_Ene_Hyd_Amm"), list("Fin_Ene_Hyd_Amm"), "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$", "-NH3$",
-    "Hydrogen", list("Sec_Ene_Hyd"), list("Fin_Ene_Hyd"), ".*-H2_.*-H2$", "-H2$",
-    "Synfuel", list("Sec_Ene_Hyd_Syn"), list("Fin_Ene_Liq_Hyd_syn"), ".*-(SYN|SYF|LFS|EFS)_.*-(SYN|SYF|LFS|EFS)$", "-(SYN|SYF|LFS|EFS)$"
+    "Ammonia",
+      list(list("Sec_Ene_Hyd_Amm")),
+      list(list("Fin_Ene_Hyd_Amm")),
+      "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",
+      "-NH3$",
+    "Hydrogen",
+      list(list("Sec_Ene_Hyd")),
+      list(list("Fin_Ene_Hyd")),
+      ".*-H2_.*-H2$",
+      "-H2$",
+    "Synfuel",
+      list("Sec_Ene_Hyd_syn"),
+      list(c("Fin_Ene_Liq_Hyd_syn", "Fin_Ene_Gas_Hyd_syn")),
+       "^R31-[A-Z0-9]+-SYF_R31-[A-Z0-9]+-SYF$",
+       "-SYF$",
   )
   fuel_levels <- fuel_specs$Fuel
   conversion_specs <- tribble(
@@ -165,21 +186,73 @@
     setNames(conversion_specs$FillColor, conversion_specs$FlowType)
   )
 
-  get_region_variable_value <- function(df, variables, model_name, scenario_name, region_name) {
-    variables <- unlist(variables, use.names = FALSE)
-
-    df %>%
-      filter(
-        Model == model_name,
-        Scenario == scenario_name,
-        Region == region_name,
-        Year == plot_year,
-        str_to_lower(Variable) %in% str_to_lower(variables)
-      ) %>%
-      summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
-      pull(Value) %>%
-      { if (length(.) == 0 || !is.finite(.)) 0 else . }
+  normalize_variable_groups <- function(variables) {
+    if (is.list(variables) && !is.data.frame(variables)) {
+      lapply(variables, function(x) unlist(x, use.names = FALSE))
+    } else {
+      list(unlist(variables, use.names = FALSE))
+    }
   }
+
+  get_region_variable_value <- function(df, variables, model_name, scenario_name, region_name) {
+    variable_groups <- normalize_variable_groups(variables)
+
+    for (variables in variable_groups) {
+      d <- df %>%
+        filter(
+          Model == model_name,
+          Scenario == scenario_name,
+          Region == region_name,
+          Year == plot_year,
+          str_to_lower(Variable) %in% str_to_lower(variables)
+        )
+
+      if (nrow(d) > 0) {
+        value <- sum(d$Value, na.rm = TRUE)
+        return(if (is.finite(value)) value else 0)
+      }
+    }
+
+    0
+  }
+
+  report_missing_variable_groups <- function(df, model_name, specs, column_name, value_label) {
+    for (i in seq_len(nrow(specs))) {
+      spec <- specs[i, ]
+      groups <- normalize_variable_groups(spec[[column_name]][[1]])
+
+      for (scenario_name in target_scenarios) {
+        has_group <- vapply(groups, function(variables) {
+          df %>%
+            filter(
+              Model == model_name,
+              Scenario == scenario_name,
+              Year == plot_year,
+              str_to_lower(Variable) %in% str_to_lower(variables)
+            ) %>%
+            nrow() > 0
+        }, logical(1))
+
+        if (!any(has_group)) {
+          warning(
+            "No ",
+            value_label,
+            " variables found for ",
+            spec$Fuel,
+            " in ",
+            model_name,
+            " iamc_gdx / scenario ",
+            scenario_name,
+            ". Tried: ",
+            paste(vapply(groups, paste, collapse = "+", character(1)), collapse = " or ")
+          )
+        }
+      }
+    }
+  }
+
+  report_missing_variable_groups(all_data, "PSM", fuel_specs, "SupplyVariables", "supply")
+  report_missing_variable_groups(all_data, "AIM-Technology", fuel_specs, "DemandVariables", "demand")
 
   read_carrier_flow_symbol <- function(scenario_name, symbol, base_direction, fuel_spec) {
     gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -231,10 +304,12 @@
     case_when(
       str_detect(node_name, "-H2$") ~ "Hydrogen",
       str_detect(node_name, "-NH3$") ~ "Ammonia",
-      str_detect(node_name, "-(SYN|SYF|LFS|EFS)$") ~ "Synfuel",
+      str_detect(node_name, "-SYF$") ~ "Synfuel",
       TRUE ~ NA_character_
     )
   }
+
+  conversion_link_pattern <- "^(.+-(?:H2|NH3|SYN|SYF|LFS|EFS))_(.+-(?:H2|NH3|SYN|SYF|LFS|EFS))$"
 
   normalize_conversion_node <- function(node_name) {
     node_name %>%
@@ -249,14 +324,23 @@
       return(tibble())
     }
 
-    flows <- rgdx.param(gdx_path, symbol) %>%
+    flows_raw <- rgdx.param(gdx_path, symbol) %>%
       mutate(across(where(is.factor), as.character)) %>%
-      filter(str_detect(L, "-(H2|NH3|SYN|SYF|LFS|EFS)_.*-(H2|NH3|SYN|SYF|LFS|EFS)$")) %>%
+      filter(str_detect(L, conversion_link_pattern)) %>%
       group_by(L) %>%
       summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours * gwh_to_ej, .groups = "drop") %>%
-      filter(is.finite(Value), Value != 0) %>%
-      separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
+      filter(is.finite(Value), Value != 0)
+
+    if (nrow(flows_raw) == 0) {
+      return(tibble(Scenario = character(), FromCarrier = character(), ToCarrier = character(), FromRegion = character(), ToRegion = character(), Value = numeric()))
+    }
+
+    link_nodes <- str_match(flows_raw$L, conversion_link_pattern)
+
+    flows <- flows_raw %>%
       mutate(
+        N0 = link_nodes[, 2],
+        N1 = link_nodes[, 3],
         N0Carrier = get_conversion_carrier(N0),
         N1Carrier = get_conversion_carrier(N1),
         N0 = normalize_conversion_node(N0),
@@ -317,6 +401,20 @@
       read_carrier_flows(scenario_name, fuel_specs[i, ])
     }))
   }))
+
+  report_missing_carrier_transport <- function(df, fuel_name) {
+    for (scenario_name in target_scenarios) {
+      has_transport <- df %>%
+        filter(Scenario == scenario_name, Fuel == fuel_name, Value > 0) %>%
+        nrow() > 0
+
+      if (!has_transport) {
+        warning("No regional transport links found for ", fuel_name, " / scenario ", scenario_name, ".")
+      }
+    }
+  }
+
+  report_missing_carrier_transport(carrier_edge_data, "Synfuel")
 
   conversion_flow_data <- bind_rows(lapply(target_scenarios, read_conversion_flows))
 

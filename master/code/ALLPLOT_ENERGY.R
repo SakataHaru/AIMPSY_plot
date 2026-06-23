@@ -62,15 +62,24 @@ read_iamc_gdx <- function(main_dir, model_name) {
   }
 
   rgdx.param(gdx_path, "iamc_gdx") %>%
+    drop_r31_region_rows() %>%
     transmute(
       Scenario = as.character(Sc),
-      Region = str_remove(as.character(Sr), "^R31-"),
+      Region = RawRegion,
       Variable = as.character(Sv),
       Year = as.numeric(as.character(Y5)),
       Value = suppressWarnings(as.numeric(as.character(iamc_gdx))),
       Model = model_name
     ) %>%
-    filter(!is.na(Value))
+    filter(!is.na(Value)) %>%
+    group_by(Scenario, Region, Variable, Year, Model) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+}
+
+drop_r31_region_rows <- function(df) {
+  df %>%
+    mutate(RawRegion = as.character(Sr)) %>%
+    filter(!str_detect(RawRegion, "^R31-"))
 }
 
 add_world_rows <- function(df, regions, replace_existing = FALSE) {
@@ -259,31 +268,107 @@ link_counterpart_colors <- setNames(
 )
 
 fuel_specs <- tribble(
-  ~Fuel, ~SupplyVariables, ~DemandVariables, ~LinkPattern, ~NodeSuffixPattern, ~Color,
-  "Hydrogen", list("Sec_Ene_Hyd"), list("Fin_Ene_Hyd"), ".*-H2_.*-H2$", "-H2$", "#8ecae6",
-  "Ammonia", list("Sec_Ene_Hyd_Amm"), list("Fin_Ene_Hyd_Amm"), "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$", "-NH3$", "#ffb703",
-  "Synfuel", list("Sec_Ene_Hyd_Syn"), list("Fin_Ene_Liq_Hyd_syn"), ".*-(SYN|SYF|LFS|EFS)_.*-(SYN|SYF|LFS|EFS)$", "-(SYN|SYF|LFS|EFS)$", "#c77dff"
+  ~Fuel, ~SupplyVariables, ~DemandVariables, ~LinkPattern, ~NodeSuffixPattern,
+  "Ammonia",
+    list(list("Sec_Ene_Hyd_Amm")),
+    list(list("Fin_Ene_Hyd_Amm")),
+    "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",
+    "-NH3$",
+  "Hydrogen",
+    list(list("Sec_Ene_Hyd")),
+    list(list("Fin_Ene_Hyd")),
+    ".*-H2_.*-H2$",
+    "-H2$",
+  "Synfuel",
+    list("Sec_Ene_Hyd_syn"),
+    list(c("Fin_Ene_Liq_Hyd_syn", "Fin_Ene_Gas_Hyd_syn")),
+    "^R31-[A-Z0-9]+-SYF_R31-[A-Z0-9]+-SYF$",
+    "-SYF$"
 )
 fuel_levels <- fuel_specs$Fuel
-fuel_colors <- setNames(fuel_specs$Color, fuel_specs$Fuel)
-fuel_flow_types <- c("Supply", "Import")
-fuel_flow_colors <- c("Supply" = "#9ecae1", "Import" = "#31a354")
+conversion_specs <- tribble(
+  ~FromCarrier, ~ToCarrier, ~FlowType, ~FillColor, ~CurveColor, ~CurveLayer, ~StackInDestination,
+  "Hydrogen", "Ammonia", "H2 to NH3", "#9ecae1", "#3182bd", "lower", FALSE,
+  "Ammonia", "Hydrogen", "NH3 to H2", "#de2d26", "#fb6a4a", "upper", TRUE,
+  "Hydrogen", "Synfuel", "H2 to Syn", "#bcbddc", "#756bb1", "lower", FALSE,
+  "Synfuel", "Hydrogen", "Syn to H2", "#fdae6b", "#e6550d", "upper", TRUE,
+  "Ammonia", "Synfuel", "NH3 to Syn", "#fdd0a2", "#fd8d3c", "lower", FALSE,
+  "Synfuel", "Ammonia", "Syn to NH3", "#fdae6b", "#e6550d", "upper", FALSE
+)
+fuel_flow_types <- c("Supply", "Import", conversion_specs$FlowType)
+fuel_flow_colors <- c(
+  "Supply" = "#9ecae1",
+  "Import" = "#31a354",
+  setNames(conversion_specs$FillColor, conversion_specs$FlowType)
+)
+
+normalize_variable_groups <- function(variables) {
+  if (is.list(variables) && !is.data.frame(variables)) {
+    lapply(variables, function(x) unlist(x, use.names = FALSE))
+  } else {
+    list(unlist(variables, use.names = FALSE))
+  }
+}
 
 get_region_variable_value <- function(df, variables, model_name, scenario_name, region_name) {
-  variables <- unlist(variables, use.names = FALSE)
+  variable_groups <- normalize_variable_groups(variables)
 
-  df %>%
-    filter(
-      Model == model_name,
-      Scenario == scenario_name,
-      Region == region_name,
-      Year == plot_year,
-      str_to_lower(Variable) %in% str_to_lower(variables)
-    ) %>%
-    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
-    pull(Value) %>%
-    { if (length(.) == 0 || !is.finite(.)) 0 else . }
+  for (variables in variable_groups) {
+    d <- df %>%
+      filter(
+        Model == model_name,
+        Scenario == scenario_name,
+        Region == region_name,
+        Year == plot_year,
+        str_to_lower(Variable) %in% str_to_lower(variables)
+      )
+
+    if (nrow(d) > 0) {
+      value <- sum(d$Value, na.rm = TRUE)
+      return(if (is.finite(value)) value else 0)
+    }
+  }
+
+  0
 }
+
+report_missing_variable_groups <- function(df, model_name, specs, column_name, value_label) {
+  for (i in seq_len(nrow(specs))) {
+    spec <- specs[i, ]
+    groups <- normalize_variable_groups(spec[[column_name]][[1]])
+
+    for (scenario_name in target_scenarios) {
+      has_group <- vapply(groups, function(variables) {
+        df %>%
+          filter(
+            Model == model_name,
+            Scenario == scenario_name,
+            Year == plot_year,
+            str_to_lower(Variable) %in% str_to_lower(variables)
+          ) %>%
+          nrow() > 0
+      }, logical(1))
+
+      if (!any(has_group)) {
+        warning(
+          "No ",
+          value_label,
+          " variables found for ",
+          spec$Fuel,
+          " in ",
+          model_name,
+          " iamc_gdx / scenario ",
+          scenario_name,
+          ". Tried: ",
+          paste(vapply(groups, paste, collapse = "+", character(1)), collapse = " or ")
+        )
+      }
+    }
+  }
+}
+
+report_missing_variable_groups(all_data, "PSM", fuel_specs, "SupplyVariables", "supply")
+report_missing_variable_groups(all_data, "AIM-Technology", fuel_specs, "DemandVariables", "demand")
 
 read_carrier_flow_symbol <- function(scenario_name, symbol, base_direction, fuel_spec) {
   gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -337,6 +422,144 @@ carrier_edge_data <- bind_rows(lapply(target_scenarios, function(scenario_name) 
   }))
 }))
 
+report_missing_carrier_transport <- function(df, fuel_name) {
+  for (scenario_name in target_scenarios) {
+    has_transport <- df %>%
+      filter(Scenario == scenario_name, Fuel == fuel_name, Value > 0) %>%
+      nrow() > 0
+
+    if (!has_transport) {
+      warning("No regional transport links found for ", fuel_name, " / scenario ", scenario_name, ".")
+    }
+  }
+}
+
+report_missing_carrier_transport(carrier_edge_data, "Synfuel")
+
+get_conversion_carrier <- function(node_name) {
+  case_when(
+    str_detect(node_name, "-H2$") ~ "Hydrogen",
+    str_detect(node_name, "-NH3$") ~ "Ammonia",
+    str_detect(node_name, "-SYF$") ~ "Synfuel",
+    TRUE ~ NA_character_
+  )
+}
+
+conversion_link_pattern <- "^(.+-(?:H2|NH3|SYN|SYF|LFS|EFS))_(.+-(?:H2|NH3|SYN|SYF|LFS|EFS))$"
+
+normalize_conversion_node <- function(node_name) {
+  node_name %>%
+    str_remove("-(H2|NH3|SYN|SYF|LFS|EFS)$") %>%
+    str_remove("^R31-")
+}
+
+read_conversion_flow_symbol <- function(scenario_name, symbol, base_direction) {
+  gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(gdx_path)) {
+    warning("Missing conversion flow GDX file: ", gdx_path)
+    return(tibble())
+  }
+
+  flows_raw <- rgdx.param(gdx_path, symbol) %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, conversion_link_pattern)) %>%
+    group_by(L) %>%
+    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours * gwh_to_ej, .groups = "drop") %>%
+    filter(is.finite(Value), Value != 0)
+
+  if (nrow(flows_raw) == 0) {
+    return(tibble(Scenario = character(), FromCarrier = character(), ToCarrier = character(), FromRegion = character(), ToRegion = character(), Value = numeric()))
+  }
+
+  link_nodes <- str_match(flows_raw$L, conversion_link_pattern)
+
+  flows <- flows_raw %>%
+    mutate(
+      N0 = link_nodes[, 2],
+      N1 = link_nodes[, 3],
+      N0Carrier = get_conversion_carrier(N0),
+      N1Carrier = get_conversion_carrier(N1),
+      N0 = normalize_conversion_node(N0),
+      N1 = normalize_conversion_node(N1)
+    )
+
+  if (base_direction == "backward") {
+    flows <- flows %>%
+      mutate(
+        FromNodeBase = N1,
+        ToNodeBase = N0,
+        FromCarrierBase = N1Carrier,
+        ToCarrierBase = N0Carrier
+      )
+  } else {
+    flows <- flows %>%
+      mutate(
+        FromNodeBase = N0,
+        ToNodeBase = N1,
+        FromCarrierBase = N0Carrier,
+        ToCarrierBase = N1Carrier
+      )
+  }
+
+  flows %>%
+    mutate(
+      FromNode = if_else(Value >= 0, FromNodeBase, ToNodeBase),
+      ToNode = if_else(Value >= 0, ToNodeBase, FromNodeBase),
+      FromCarrier = if_else(Value >= 0, FromCarrierBase, ToCarrierBase),
+      ToCarrier = if_else(Value >= 0, ToCarrierBase, FromCarrierBase),
+      FromRegion = node_to_region(FromNode),
+      ToRegion = node_to_region(ToNode),
+      Value = abs(Value),
+      Scenario = scenario_name
+    ) %>%
+    select(Scenario, FromCarrier, ToCarrier, FromRegion, ToRegion, Value)
+}
+
+read_conversion_flows <- function(scenario_name) {
+  flows <- bind_rows(
+    read_conversion_flow_symbol(scenario_name, "vff_l", "forward"),
+    read_conversion_flow_symbol(scenario_name, "vfb_l", "backward")
+  )
+
+  if (nrow(flows) == 0) {
+    return(tibble(Scenario = character(), FromCarrier = character(), ToCarrier = character(), FromRegion = character(), ToRegion = character(), Value = numeric()))
+  }
+
+  flows %>%
+    filter(FromRegion %in% region_base, ToRegion %in% region_base) %>%
+    filter(!is.na(FromCarrier), !is.na(ToCarrier), FromCarrier != ToCarrier) %>%
+    group_by(Scenario, FromCarrier, ToCarrier, FromRegion, ToRegion) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+}
+
+conversion_flow_data <- bind_rows(lapply(target_scenarios, read_conversion_flows))
+
+conversion_plot_data <- conversion_flow_data %>%
+  inner_join(conversion_specs, by = c("FromCarrier", "ToCarrier")) %>%
+  group_by(Scenario, Region = ToRegion, FromCarrier, ToCarrier, FlowType, CurveColor, CurveLayer, StackInDestination) %>%
+  summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+
+conversion_plot_world <- conversion_plot_data %>%
+  group_by(Scenario, FromCarrier, ToCarrier, FlowType, CurveColor, CurveLayer, StackInDestination) %>%
+  summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
+  mutate(Region = "World")
+
+conversion_plot_data <- bind_rows(conversion_plot_data, conversion_plot_world)
+
+conversion_supply_data <- conversion_plot_data %>%
+  filter(StackInDestination) %>%
+  transmute(
+    Scenario,
+    Region,
+    Fuel = ToCarrier,
+    FlowType,
+    Value
+  )
+
+incoming_conversion_totals <- conversion_supply_data %>%
+  group_by(Scenario, Region, Fuel) %>%
+  summarise(IncomingConversion = sum(Value, na.rm = TRUE), .groups = "drop")
+
 make_region_carrier_trade_rows <- function(df, scenario_name, region_name) {
   bind_rows(lapply(fuel_levels, function(fuel_name) {
     if (region_name == "World") {
@@ -388,8 +611,10 @@ carrier_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_nam
   }))
 })) %>%
   left_join(carrier_trade_data, by = c("Scenario", "Region", "Fuel")) %>%
+  left_join(incoming_conversion_totals, by = c("Scenario", "Region", "Fuel")) %>%
   mutate(
-    across(c(Supply, Demand, Import, Export), ~replace_na(.x, 0)),
+    across(c(Supply, IncomingConversion, Demand, Import, Export), ~replace_na(.x, 0)),
+    Scenario = factor(Scenario, levels = target_scenarios),
     Fuel = factor(Fuel, levels = fuel_levels),
     Region = factor(Region, levels = region_list)
   )
@@ -615,7 +840,64 @@ plot_link_flow_region <- function(df, scenario_name, region_name) {
     guides(fill = guide_legend(ncol = 1, byrow = TRUE))
 }
 
-plot_carrier_balance_region <- function(df, scenario_name, region_name) {
+carrier_plot_theme <- theme_bw(base_size = 7.5) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(linewidth = 0.12, color = "grey88"),
+    panel.border = element_rect(linewidth = 0.25, color = "grey55", fill = NA),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = 7),
+    axis.text = element_text(size = 6.2),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 5.8),
+    legend.key.height = unit(2.0, "mm"),
+    legend.key.width = unit(3.0, "mm"),
+    plot.title = element_text(size = 8.2, hjust = 0.5, face = "bold"),
+    plot.margin = margin(1, 2, 1, 2, unit = "mm")
+  )
+
+make_ribbon_polygon_data <- function(ribbon_data, n_points = 28) {
+  if (nrow(ribbon_data) == 0) {
+    return(tibble(RibbonId = character(), FlowType = character(), x = numeric(), y = numeric()))
+  }
+
+  bind_rows(lapply(seq_len(nrow(ribbon_data)), function(i) {
+    r <- ribbon_data[i, ]
+    t <- seq(0, 1, length.out = n_points)
+    x0 <- as.numeric(r$XStart)
+    x1 <- as.numeric(r$XEnd)
+    dx <- x1 - x0
+
+    bezier <- function(p0, p1, p2, p3) {
+      (1 - t)^3 * p0 + 3 * (1 - t)^2 * t * p1 + 3 * (1 - t) * t^2 * p2 + t^3 * p3
+    }
+
+    x_top <- bezier(x0, x0 + 0.45 * dx, x1 - 0.45 * dx, x1)
+    y_top <- bezier(
+      as.numeric(r$YStartMax),
+      as.numeric(r$YStartMax),
+      as.numeric(r$YEndMax),
+      as.numeric(r$YEndMax)
+    )
+    y_bottom <- bezier(
+      as.numeric(r$YStartMin),
+      as.numeric(r$YStartMin),
+      as.numeric(r$YEndMin),
+      as.numeric(r$YEndMin)
+    )
+
+    tibble(
+      RibbonId = as.character(r$RibbonId),
+      FlowType = as.character(r$FlowType),
+      x = c(x_top, rev(x_top)),
+      y = c(y_top, rev(y_bottom))
+    )
+  }))
+}
+
+plot_carrier_balance_region <- function(df, conversion_df, scenario_name, region_name, show_legend = TRUE) {
+  bar_width <- 0.62
+
   d <- df %>%
     filter(
       Scenario == scenario_name,
@@ -624,43 +906,111 @@ plot_carrier_balance_region <- function(df, scenario_name, region_name) {
     mutate(
       Fuel = factor(Fuel, levels = fuel_levels),
       FuelX = as.numeric(Fuel),
-      TotalAvailable = Supply + Import,
+      TotalAvailable = Supply + Import + IncomingConversion,
       ExportYMin = pmax(TotalAvailable - Export, 0),
       ExportYMax = TotalAvailable
     )
 
-  if (nrow(d) == 0) {
-    d <- tibble(
-      Fuel = factor(fuel_levels, levels = fuel_levels),
-      FuelX = seq_along(fuel_levels),
-      Supply = 0,
-      Import = 0,
-      Export = 0,
-      Demand = 0,
-      TotalAvailable = 0,
-      ExportYMin = 0,
-      ExportYMax = 0
-    )
-  }
-
-  bar_data <- d %>%
+  base_bar_data <- d %>%
     select(Fuel, FuelX, Supply, Import) %>%
     pivot_longer(c(Supply, Import), names_to = "FlowType", values_to = "Value") %>%
     mutate(FlowType = factor(FlowType, levels = fuel_flow_types))
 
+  conversion_bar_data <- conversion_df %>%
+    filter(Scenario == scenario_name, Region == region_name, StackInDestination) %>%
+    mutate(
+      Fuel = factor(ToCarrier, levels = fuel_levels),
+      FuelX = as.numeric(Fuel),
+      FlowType = factor(FlowType, levels = fuel_flow_types)
+    ) %>%
+    select(Fuel, FuelX, FlowType, Value)
+
+  bar_data <- bind_rows(base_bar_data, conversion_bar_data) %>%
+    filter(Value != 0) %>%
+    mutate(StackOrder = match(as.character(FlowType), fuel_flow_types)) %>%
+    arrange(FuelX, StackOrder) %>%
+    group_by(Fuel, FuelX) %>%
+    mutate(ymin = lag(cumsum(Value), default = 0), ymax = cumsum(Value)) %>%
+    ungroup()
+
+  source_bar_bounds <- d %>%
+    transmute(
+      FromCarrier = as.character(Fuel),
+      FromX = FuelX,
+      SourceTotal = TotalAvailable
+    )
+  target_conversion_bounds <- bar_data %>%
+    filter(as.character(FlowType) %in% conversion_specs$FlowType) %>%
+    transmute(
+      ToCarrier = as.character(Fuel),
+      FlowType = as.character(FlowType),
+      TargetYMin = ymin,
+      TargetYMax = ymax
+    )
+
+  conversion_ribbon_data <- conversion_df %>%
+    filter(Scenario == scenario_name, Region == region_name, Value > 0) %>%
+    mutate(
+      FromX = match(FromCarrier, fuel_levels),
+      ToX = match(ToCarrier, fuel_levels)
+    ) %>%
+    filter(!is.na(FromX), !is.na(ToX), FromX != ToX) %>%
+    left_join(source_bar_bounds, by = c("FromCarrier", "FromX")) %>%
+    left_join(target_conversion_bounds, by = c("ToCarrier", "FlowType")) %>%
+    left_join(
+      d %>% transmute(ToCarrier = as.character(Fuel), ToX = FuelX, SupplyYMin = 0, SupplyYMax = Supply),
+      by = c("ToCarrier", "ToX")
+    ) %>%
+    filter(!is.na(SourceTotal)) %>%
+    mutate(
+      TargetYMin = if_else(StackInDestination, TargetYMin, SupplyYMin),
+      TargetYMax = if_else(StackInDestination, TargetYMax, SupplyYMax),
+      SourceYMin = if_else(CurveLayer == "upper", pmax(SourceTotal - Value, 0), 0),
+      SourceYMax = if_else(CurveLayer == "upper", SourceTotal, pmin(Value, SourceTotal)),
+      XStart = if_else(FromX <= ToX, FromX + bar_width / 2, FromX - bar_width / 2),
+      XEnd = if_else(FromX <= ToX, ToX - bar_width / 2, ToX + bar_width / 2),
+      RibbonId = paste(Scenario, Region, FromCarrier, ToCarrier, FlowType, row_number(), sep = "__"),
+      YStartMin = SourceYMin,
+      YStartMax = SourceYMax,
+      YEndMin = TargetYMin,
+      YEndMax = TargetYMax
+    ) %>%
+    filter(!is.na(YEndMin), !is.na(YEndMax), YEndMax > YEndMin)
+
+  ribbon_polygon_data <- make_ribbon_polygon_data(conversion_ribbon_data)
   export_data <- d %>%
     filter(Export > 0, ExportYMax > ExportYMin)
 
-  p <- ggplot(bar_data, aes(x = FuelX, y = Value, fill = FlowType)) +
-    geom_col(width = 0.58, color = "white", linewidth = 0.08)
+  p <- ggplot()
+
+  if (nrow(ribbon_polygon_data) > 0) {
+    p <- p +
+      geom_polygon(
+        data = ribbon_polygon_data,
+        aes(x = x, y = y, group = RibbonId, fill = FlowType),
+        inherit.aes = FALSE,
+        alpha = 0.38,
+        color = NA,
+        show.legend = FALSE
+      )
+  }
+
+  p <- p +
+    geom_rect(
+      data = bar_data,
+      aes(xmin = FuelX - bar_width / 2, xmax = FuelX + bar_width / 2, ymin = ymin, ymax = ymax, fill = FlowType),
+      color = "white",
+      linewidth = 0.08,
+      inherit.aes = FALSE
+    )
 
   if (nrow(export_data) > 0) {
     p <- p +
       geom_rect(
       data = export_data,
       aes(
-        xmin = FuelX - 0.29,
-        xmax = FuelX + 0.29,
+        xmin = FuelX - 0.31,
+        xmax = FuelX + 0.31,
         ymin = ExportYMin,
         ymax = ExportYMax,
         alpha = "Export"
@@ -677,27 +1027,23 @@ plot_carrier_balance_region <- function(df, scenario_name, region_name) {
       data = d,
       aes(x = FuelX, y = Demand, shape = "AIM-Tech demand"),
       inherit.aes = FALSE,
-      size = 3,
-      stroke = 0.45,
+      size = 2.2,
+      stroke = 0.4,
       fill = "white",
       color = "black"
     ) +
     scale_fill_manual(values = fuel_flow_colors, drop = FALSE) +
     scale_shape_manual(values = c("AIM-Tech demand" = 23), name = NULL) +
-    scale_x_continuous(breaks = seq_along(fuel_levels), labels = c("H2", "NH3", "Syn")) +
+    scale_x_continuous(breaks = seq_along(fuel_levels), labels = c("NH3", "H2", "Syn")) +
     expand_limits(y = 0) +
     labs(
-      y = expression(paste("Carrier balance (EJ ", {yr^-1}, ")")),
+      y = expression(paste("Balance (EJ ", {yr^-1}, ")")),
       title = "H2/NH3/synfuel balance: 2050"
     ) +
-    plot_theme +
+    carrier_plot_theme +
     theme(
-      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 7.5),
-      legend.position = "right",
-      legend.text = element_text(size = 5.8),
-      legend.key.height = unit(2.0, "mm"),
-      legend.key.width = unit(3.0, "mm"),
-      plot.margin = margin(1, 2, 1, 2, unit = "mm")
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 6.2),
+      legend.position = if (show_legend) "right" else "none"
     ) +
     guides(
       fill = guide_legend(ncol = 1, byrow = TRUE, order = 1),
@@ -716,7 +1062,7 @@ make_region_row <- function(df, scenario_name, region_name) {
       plot_power_mix_region(df, scenario_name, region_name) |
       secele_legend_plot |
       plot_link_flow_region(link_flow_data, scenario_name, region_name) |
-      plot_carrier_balance_region(carrier_balance_data, scenario_name, region_name)
+      plot_carrier_balance_region(carrier_balance_data, conversion_plot_data, scenario_name, region_name)
   ) +
     plot_layout(widths = c(0.28, 0.55, 0.42, 0.39, 0.50, 0.88, 0.62, 0.82, 0.92))
 }
