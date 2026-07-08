@@ -34,9 +34,9 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 scenario_group <- "global_softlink_Sc"
 region <- "Global"
-date <- "2606151735"
+date <- "2606171718"
 plot_year <- 2050
-scenarios <- c("NPi500", "NPi500-ZF2050")
+scenarios <- c("NPi500-LimCCS_bio")
 
 base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_260617")
 

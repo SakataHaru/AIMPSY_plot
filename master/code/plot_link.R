@@ -34,7 +34,7 @@ aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir 
 scenario_group <- "global_softlink_Sc"
 region <- "Global"
 date <- "2606171718"
-scenarios <- c("NPi500", "NPi500-ZF2050")
+scenarios <- c("NPi500-LimCCS_bio")
 plot_year <- 2050
 
 ddir <- file.path(aimpsy, scenario_group, region, date)

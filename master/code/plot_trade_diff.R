@@ -37,7 +37,7 @@ region <- "Global"
 date <- "2606171718"
 plot_year <- 2050
 base_scenario <- "NPi500"
-scenarios <- c("NPi500-ZF2050")
+scenarios <- c("NPi500-LimCCS_bio")
 
 script_args <- commandArgs(trailingOnly = FALSE)
 script_path <- sub("^--file=", "", script_args[grepl("^--file=", script_args)])

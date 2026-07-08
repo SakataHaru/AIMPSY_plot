@@ -37,7 +37,7 @@ aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softli
 psm_primary_dir <- file.path(dirname(psm_main_dir), "gams_output", "gdx_primary")
 r272_map_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/AIMPSY-master/data/set/M_R272.csv"
 
-target_scenarios <- c("NPi500", "NPi500-ZF2050")
+target_scenarios <- c("NPi500-LimCCS_bio")
 plot_year <- 2050
 time_years <- seq(2020, 2050, by = 5)
 time_slice_hours <- 6
@@ -619,6 +619,279 @@ carrier_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_nam
     Region = factor(Region, levels = region_list)
   )
 
+biomass_supply_variables <- list(
+  c("Prm_Ene_Bio_wo_CCS", "Prm_Ene_Bio_w_CCS"),
+  "Prm_Ene_Bio"
+)
+biomass_demand_variables <- list(
+  c("Sec_Ene_Ele_Bio_wo_CCS", "Sec_Ene_Ele_Bio_w_CCS"),
+  "Sec_Ene_Ele_Bio",
+  c("Fin_Ene_SolidsBio", "Fin_Ene_Liq_Bio")
+)
+biomass_spec <- tibble(
+  Fuel = "Biomass",
+  LinkPattern = "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$",
+  NodeSuffixPattern = "-BMS$"
+)
+
+read_biomass_flow_symbol <- function(scenario_name, symbol, base_direction) {
+  gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(gdx_path)) {
+    warning("Missing biomass flow GDX file: ", gdx_path)
+    return(tibble())
+  }
+
+  rgdx.param(gdx_path, symbol) %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(str_detect(L, biomass_spec$LinkPattern)) %>%
+    group_by(L) %>%
+    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours * gwh_to_ej, .groups = "drop") %>%
+    filter(is.finite(Value), Value != 0) %>%
+    separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
+    mutate(
+      N0 = normalize_carrier_node(N0, biomass_spec$NodeSuffixPattern),
+      N1 = normalize_carrier_node(N1, biomass_spec$NodeSuffixPattern),
+      FromNodeBase = if (base_direction == "backward") N1 else N0,
+      ToNodeBase = if (base_direction == "backward") N0 else N1,
+      FromNode = if_else(Value >= 0, FromNodeBase, ToNodeBase),
+      ToNode = if_else(Value >= 0, ToNodeBase, FromNodeBase),
+      FromRegion = node_to_region(FromNode),
+      ToRegion = node_to_region(ToNode),
+      Value = abs(Value),
+      Scenario = scenario_name
+    ) %>%
+    select(Scenario, FromRegion, ToRegion, Value)
+}
+
+read_biomass_flows <- function(scenario_name) {
+  flows <- bind_rows(
+    read_biomass_flow_symbol(scenario_name, "vff_l", "forward"),
+    read_biomass_flow_symbol(scenario_name, "vfb_l", "backward")
+  )
+
+  if (nrow(flows) == 0) {
+    return(tibble(Scenario = character(), FromRegion = character(), ToRegion = character(), Value = numeric()))
+  }
+
+  flows %>%
+    filter(FromRegion %in% region_base, ToRegion %in% region_base, FromRegion != ToRegion) %>%
+    group_by(Scenario, FromRegion, ToRegion) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+}
+
+biomass_edge_data <- bind_rows(lapply(target_scenarios, read_biomass_flows))
+
+make_region_biomass_trade_rows <- function(df, scenario_name, region_name) {
+  if (region_name == "World") {
+    trade <- df %>%
+      filter(Scenario == scenario_name, FromRegion != ToRegion) %>%
+      summarise(Import = sum(Value, na.rm = TRUE), Export = sum(Value, na.rm = TRUE), .groups = "drop")
+  } else {
+    trade <- df %>%
+      filter(Scenario == scenario_name) %>%
+      summarise(
+        Import = sum(Value[ToRegion == region_name & FromRegion != region_name], na.rm = TRUE),
+        Export = sum(Value[FromRegion == region_name & ToRegion != region_name], na.rm = TRUE),
+        .groups = "drop"
+      )
+  }
+
+  tibble(
+    Scenario = scenario_name,
+    Region = region_name,
+    Import = if_else(is.na(trade$Import), 0, trade$Import),
+    Export = if_else(is.na(trade$Export), 0, trade$Export)
+  )
+}
+
+biomass_trade_data <- bind_rows(lapply(target_scenarios, function(scenario_name) {
+  bind_rows(lapply(region_list, function(region_name) {
+    make_region_biomass_trade_rows(biomass_edge_data, scenario_name, region_name)
+  }))
+})) %>%
+  mutate(
+    Import = if_else(Region == "World", 0, Import),
+    Export = if_else(Region == "World", 0, Export)
+  )
+
+biomass_import_source_data <- biomass_edge_data %>%
+  group_by(Scenario, Region = ToRegion, SourceRegion = FromRegion) %>%
+  summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
+  filter(Value > 0) %>%
+  mutate(
+    Scenario = factor(Scenario, levels = target_scenarios),
+    Region = factor(Region, levels = region_list),
+    SourceRegion = factor(SourceRegion, levels = region_base)
+  )
+
+biomass_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_name) {
+  bind_rows(lapply(region_list, function(region_name) {
+    tibble(
+      Scenario = scenario_name,
+      Region = region_name,
+      Supply = get_region_variable_value(all_data, biomass_supply_variables, "AIM-Technology", scenario_name, region_name),
+      Demand = get_region_variable_value(all_data, biomass_demand_variables, "AIM-Technology", scenario_name, region_name)
+    )
+  }))
+})) %>%
+  left_join(biomass_trade_data, by = c("Scenario", "Region")) %>%
+  mutate(
+    across(c(Supply, Demand, Import, Export), ~replace_na(.x, 0)),
+    Scenario = factor(Scenario, levels = target_scenarios),
+    Region = factor(Region, levels = region_list),
+    TotalAvailable = Supply + Import,
+    ExportYMin = pmax(TotalAvailable - Export, 0),
+    ExportYMax = TotalAvailable
+  )
+
+biomass_source_levels <- c("Domestic supply", region_base)
+biomass_source_colors <- c(
+  "Domestic supply" = "#7fbf3f",
+  setNames(grDevices::hcl.colors(length(region_base), palette = "Dark 3"), region_base)
+)
+
+make_biomass_bar_data <- function(balance_row, imports) {
+  domestic <- balance_row %>%
+    transmute(
+      Scenario,
+      Region,
+      SourceRegion = "Domestic supply",
+      Value = Supply
+    )
+
+  incoming <- imports %>%
+    filter(
+      Scenario == balance_row$Scenario[[1]],
+      Region == balance_row$Region[[1]]
+    ) %>%
+    transmute(
+      Scenario = as.character(Scenario),
+      Region = as.character(Region),
+      SourceRegion = as.character(SourceRegion),
+      Value
+    )
+
+  bind_rows(domestic, incoming) %>%
+    filter(Value != 0) %>%
+    mutate(
+      SourceRegion = factor(SourceRegion, levels = biomass_source_levels),
+      SourceOrder = match(as.character(SourceRegion), biomass_source_levels)
+    ) %>%
+    arrange(SourceOrder) %>%
+    mutate(
+      ymin = lag(cumsum(Value), default = 0),
+      ymax = cumsum(Value),
+      ymid = (ymin + ymax) / 2
+    )
+}
+
+ccs_storage_kind_levels <- c("Storage use")
+ccs_storage_kind_colors <- c("Storage use" = "#238b45")
+
+get_primary_gdx_path <- function(scenario_name) {
+  file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
+}
+
+add_world_storage_rows <- function(df) {
+  world <- df %>%
+    filter(Region %in% region_base) %>%
+    group_by(Scenario, StorageKind) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Region = "World")
+
+  bind_rows(df, world)
+}
+
+read_ccs_storage_potential <- function(scenario_name) {
+  gdx_path <- get_primary_gdx_path(scenario_name)
+  if (!file.exists(gdx_path)) {
+    warning("Missing primary GDX file: ", gdx_path)
+    return(tibble(Scenario = character(), Region = character(), StorageKind = character(), Value = numeric()))
+  }
+
+  potential_data <- rgdx.param(gdx_path, "pmax") %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(MK == "SCO2") %>%
+    transmute(
+      Scenario = scenario_name,
+      Region = node_to_region(ME),
+      StorageKind = "Storage potential",
+      Value = suppressWarnings(as.numeric(as.character(pmax)))
+    ) %>%
+    filter(Region %in% region_base, is.finite(Value), Value > 0) %>%
+    group_by(Scenario, Region, StorageKind) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+
+  if (nrow(potential_data) == 0) {
+    return(tibble(Scenario = character(), Region = character(), StorageKind = character(), Value = numeric()))
+  }
+
+  potential_data %>%
+    add_world_storage_rows() %>%
+    mutate(
+      Region = factor(Region, levels = region_list),
+      StorageKind = factor(StorageKind, levels = "Storage potential")
+    )
+}
+
+read_ccs_storage_use <- function(scenario_name) {
+  gdx_path <- get_primary_gdx_path(scenario_name)
+  if (!file.exists(gdx_path)) {
+    warning("Missing primary GDX file: ", gdx_path)
+    return(tibble(Scenario = character(), Region = character(), StorageKind = character(), Value = numeric()))
+  }
+
+  use_data <- rgdx.param(gdx_path, "vp_l") %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(I == "CCS", K %in% c("SCO2ON", "SCO2OF")) %>%
+    transmute(
+      Scenario = scenario_name,
+      Region = node_to_region(N),
+      StorageKind = "Storage use",
+      Value = suppressWarnings(as.numeric(as.character(vp_l)))
+    ) %>%
+    filter(Region %in% region_base, is.finite(Value), Value > 0) %>%
+    group_by(Scenario, Region, StorageKind) %>%
+    summarise(Value = sum(Value, na.rm = TRUE), .groups = "drop")
+
+  if (nrow(use_data) == 0) {
+    return(tibble(Scenario = character(), Region = character(), StorageKind = character(), Value = numeric()))
+  }
+
+  use_data %>%
+    add_world_storage_rows() %>%
+    mutate(
+      Region = factor(Region, levels = region_list),
+      StorageKind = factor(StorageKind, levels = ccs_storage_kind_levels)
+    )
+}
+
+ccs_potential_data <- bind_rows(lapply(target_scenarios, read_ccs_storage_potential))
+ccs_use_data <- bind_rows(lapply(target_scenarios, read_ccs_storage_use))
+
+ccs_summary_data <- expand_grid(
+  Scenario = target_scenarios,
+  Region = region_list
+) %>%
+  left_join(
+    ccs_potential_data %>%
+      group_by(Scenario, Region) %>%
+      summarise(Potential = sum(Value, na.rm = TRUE), .groups = "drop"),
+    by = c("Scenario", "Region")
+  ) %>%
+  left_join(
+    ccs_use_data %>%
+      group_by(Scenario, Region) %>%
+      summarise(Use = sum(Value, na.rm = TRUE), .groups = "drop"),
+    by = c("Scenario", "Region")
+  ) %>%
+  mutate(
+    Potential = replace_na(Potential, 0),
+    Use = replace_na(Use, 0),
+    Scenario = factor(Scenario, levels = target_scenarios),
+    Region = factor(Region, levels = region_list)
+  )
+
 finene_read_spec <- tribble(
   ~Variable,                ~PlotVariable,           ~Legend,          ~Color,
   "Fin_Ene_SolidsCoa",      "Fin_Ene_SolidsCoa",     "Coal",           "grey70",
@@ -1052,6 +1325,188 @@ plot_carrier_balance_region <- function(df, conversion_df, scenario_name, region
     )
 }
 
+plot_biomass_balance_region <- function(balance_df, import_df, scenario_name, region_name) {
+  bar_width <- 0.62
+
+  d <- balance_df %>%
+    filter(
+      Scenario == scenario_name,
+      Region == region_name
+    )
+
+  if (nrow(d) == 0) {
+    d <- tibble(
+      Scenario = scenario_name,
+      Region = region_name,
+      Supply = 0,
+      Demand = 0,
+      Import = 0,
+      Export = 0,
+      TotalAvailable = 0,
+      ExportYMin = 0,
+      ExportYMax = 0
+    )
+  }
+
+  bar_data <- make_biomass_bar_data(d, import_df)
+  export_data <- d %>% filter(Export > 0, ExportYMax > ExportYMin)
+
+  p <- ggplot()
+
+  if (nrow(bar_data) > 0) {
+    p <- p +
+      geom_rect(
+        data = bar_data,
+        aes(
+          xmin = 1 - bar_width / 2,
+          xmax = 1 + bar_width / 2,
+          ymin = ymin,
+          ymax = ymax,
+          fill = SourceRegion
+        ),
+        color = "white",
+        linewidth = 0.08,
+        inherit.aes = FALSE
+      )
+  }
+
+  if (nrow(export_data) > 0) {
+    p <- p +
+      geom_rect(
+        data = export_data,
+        aes(
+          xmin = 1 - bar_width / 2,
+          xmax = 1 + bar_width / 2,
+          ymin = ExportYMin,
+          ymax = ExportYMax,
+          alpha = "Export"
+        ),
+        inherit.aes = FALSE,
+        fill = "grey20",
+        color = NA
+      ) +
+      scale_alpha_manual(values = c("Export" = 0.28), name = NULL)
+  }
+
+  p <- p +
+    geom_point(
+      data = d,
+      aes(x = 1, y = Demand, shape = "AIM-Tech demand"),
+      inherit.aes = FALSE,
+      size = 2.2,
+      stroke = 0.4,
+      fill = "white",
+      color = "black"
+    ) +
+    scale_fill_manual(values = biomass_source_colors, drop = FALSE) +
+    scale_shape_manual(values = c("AIM-Tech demand" = 23), name = NULL) +
+    scale_x_continuous(breaks = 1, labels = "Biomass", limits = c(0.45, 1.55)) +
+    expand_limits(y = 0)
+
+  if (region_name != "World") {
+    p <- p + coord_cartesian(ylim = c(0, 30))
+  }
+
+  p +
+    labs(
+      y = expression(paste("Biomass balance (EJ ", {yr^-1}, ")")),
+      title = "Biomass balance: 2050"
+    ) +
+    carrier_plot_theme +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 6.2),
+      legend.position = "none"
+    )
+}
+
+plot_ccs_storage_region <- function(summary_df, use_df, scenario_name, region_name) {
+  bar_width <- 0.62
+
+  use_bar <- use_df %>%
+    filter(Scenario == scenario_name, Region == region_name) %>%
+    mutate(
+      StorageKind = factor(StorageKind, levels = ccs_storage_kind_levels),
+      ymin = lag(cumsum(Value), default = 0),
+      ymax = cumsum(Value),
+      ymid = (ymin + ymax) / 2
+    )
+
+  if (nrow(use_bar) == 0) {
+    use_bar <- tibble(
+      StorageKind = factor("Storage use", levels = ccs_storage_kind_levels),
+      Value = 0,
+      ymin = 0,
+      ymax = 0,
+      ymid = 0
+    )
+  }
+
+  summary_row <- summary_df %>%
+    filter(Scenario == scenario_name, Region == region_name)
+
+  if (nrow(summary_row) == 0) {
+    summary_row <- tibble(Scenario = scenario_name, Region = region_name, Potential = 0, Use = 0)
+  }
+
+  potential_max <- max(c(summary_row$Potential, 0), na.rm = TRUE)
+  use_max <- max(c(summary_row$Use, use_bar$Value, 0), na.rm = TRUE)
+  axis_scale <- if (is.finite(potential_max) && is.finite(use_max) && potential_max > 0 && use_max > 0) {
+    potential_max / use_max
+  } else {
+    1
+  }
+  summary_row <- summary_row %>%
+    mutate(PotentialPlot = Potential / axis_scale)
+
+  p <- ggplot()
+
+  if (nrow(use_bar) > 0) {
+    p <- p +
+      geom_rect(
+        data = use_bar,
+        aes(
+          xmin = 1 - bar_width / 2,
+          xmax = 1 + bar_width / 2,
+          ymin = ymin,
+          ymax = ymax,
+          fill = StorageKind
+        ),
+        color = "white",
+        linewidth = 0.08,
+        inherit.aes = FALSE
+      )
+  }
+
+  p +
+    geom_point(
+      data = summary_row,
+      aes(x = 1, y = PotentialPlot, shape = "Storage potential"),
+      inherit.aes = FALSE,
+      size = 2.8,
+      stroke = 0.55,
+      fill = "white",
+      color = "black"
+    ) +
+    scale_fill_manual(values = ccs_storage_kind_colors, drop = FALSE) +
+    scale_shape_manual(values = c("Storage potential" = 23), name = NULL) +
+    scale_x_continuous(breaks = 1, labels = "CCS", limits = c(0.45, 1.55)) +
+    scale_y_continuous(
+      expand = expansion(mult = c(0, 0.08)),
+      sec.axis = sec_axis(~ . * axis_scale, name = expression(paste("Potential (MtCO"[2], " ", {yr^-1}, ")")))
+    ) +
+    labs(
+      y = expression(paste("Use (MtCO"[2], " ", {yr^-1}, ")")),
+      title = "CCS storage: 2050"
+    ) +
+    carrier_plot_theme +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 6.2),
+      axis.title.y.right = element_text(size = 7),
+      axis.text.y.right = element_text(size = 6.2),
+      legend.position = "none"
+    )
+}
+
 make_region_row <- function(df, scenario_name, region_name) {
   (
     blank_region_label(region_name) |
@@ -1062,9 +1517,11 @@ make_region_row <- function(df, scenario_name, region_name) {
       plot_power_mix_region(df, scenario_name, region_name) |
       secele_legend_plot |
       plot_link_flow_region(link_flow_data, scenario_name, region_name) |
-      plot_carrier_balance_region(carrier_balance_data, conversion_plot_data, scenario_name, region_name)
+      plot_carrier_balance_region(carrier_balance_data, conversion_plot_data, scenario_name, region_name) |
+      plot_biomass_balance_region(biomass_balance_data, biomass_import_source_data, scenario_name, region_name) |
+      plot_ccs_storage_region(ccs_summary_data, ccs_use_data, scenario_name, region_name)
   ) +
-    plot_layout(widths = c(0.28, 0.55, 0.42, 0.39, 0.50, 0.88, 0.62, 0.82, 0.92))
+    plot_layout(widths = c(0.28, 0.55, 0.42, 0.39, 0.50, 0.88, 0.62, 0.82, 0.92, 0.72, 0.72))
 }
 
 save_plot_page <- function(plot, filename) {
@@ -1072,7 +1529,7 @@ save_plot_page <- function(plot, filename) {
   ggsave(
     filename = filename,
     plot = plot,
-    width = 590,
+    width = 820,
     height = 300,
     units = "mm",
     dpi = 300,

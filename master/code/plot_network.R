@@ -36,7 +36,7 @@ scenario_group <- "global_softlink_Sc"
 region <- "Global"
 date <- "2606171718"
 plot_year <- 2050
-scenarios <- c("NPi500-ZF2050")
+scenarios <- c("NPi500-LimCCS_bio")
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
