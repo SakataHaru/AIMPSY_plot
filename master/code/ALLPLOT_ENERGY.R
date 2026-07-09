@@ -37,11 +37,12 @@ aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softli
 psm_primary_dir <- file.path(dirname(psm_main_dir), "gams_output", "gdx_primary")
 r272_map_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/AIMPSY-master/data/set/M_R272.csv"
 
-target_scenarios <- c("NPi500-LimCCS_bio")
+target_scenarios <- c("NPi500", "NPi500-ZF2050", "NPi500-LimCCS_bio")
 plot_year <- 2050
 time_years <- seq(2020, 2050, by = 5)
 time_slice_hours <- 6
 gwh_to_ej <- 3.6e-6
+twh_to_ej <- 3.6 / 1000
 base_dir <- file.path(project_dir, "output", "global_260617")
 
 region_list <- c(
@@ -620,13 +621,7 @@ carrier_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_nam
   )
 
 biomass_supply_variables <- list(
-  c("Prm_Ene_Bio_wo_CCS", "Prm_Ene_Bio_w_CCS"),
-  "Prm_Ene_Bio"
-)
-biomass_demand_variables <- list(
-  c("Sec_Ene_Ele_Bio_wo_CCS", "Sec_Ene_Ele_Bio_w_CCS"),
-  "Sec_Ene_Ele_Bio",
-  c("Fin_Ene_SolidsBio", "Fin_Ene_Liq_Bio")
+  c("Prm_Ene_Bio_Ele", "Prm_Ene_Bio_Hyd")
 )
 biomass_spec <- tibble(
   Fuel = "Biomass",
@@ -724,16 +719,53 @@ biomass_import_source_data <- biomass_edge_data %>%
     SourceRegion = factor(SourceRegion, levels = region_base)
   )
 
+read_biomass_power_use <- function(scenario_name) {
+  gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
+  if (!file.exists(gdx_path)) {
+    warning("Missing biomass use GDX file: ", gdx_path)
+    return(tibble(Scenario = character(), Region = character(), Demand = numeric()))
+  }
+
+  use_data <- rgdx.param(gdx_path, "vp_l") %>%
+    mutate(across(where(is.factor), as.character)) %>%
+    filter(I == "AC", K %in% c("T_CRN", "T_CRNC")) %>%
+    transmute(
+      Scenario = scenario_name,
+      Region = node_to_region(normalize_link_node(N)),
+      Demand = suppressWarnings(as.numeric(as.character(vp_l))) * twh_to_ej
+    ) %>%
+    filter(Region %in% region_base, is.finite(Demand), Demand > 0) %>%
+    group_by(Scenario, Region) %>%
+    summarise(Demand = sum(Demand, na.rm = TRUE), .groups = "drop")
+
+  if (nrow(use_data) == 0) {
+    return(tibble(Scenario = character(), Region = character(), Demand = numeric()))
+  }
+
+  world <- use_data %>%
+    group_by(Scenario) %>%
+    summarise(Demand = sum(Demand, na.rm = TRUE), .groups = "drop") %>%
+    mutate(Region = "World")
+
+  bind_rows(use_data, world) %>%
+    mutate(
+      Scenario = factor(Scenario, levels = target_scenarios),
+      Region = factor(Region, levels = region_list)
+    )
+}
+
+biomass_power_use_data <- bind_rows(lapply(target_scenarios, read_biomass_power_use))
+
 biomass_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_name) {
   bind_rows(lapply(region_list, function(region_name) {
     tibble(
       Scenario = scenario_name,
       Region = region_name,
-      Supply = get_region_variable_value(all_data, biomass_supply_variables, "AIM-Technology", scenario_name, region_name),
-      Demand = get_region_variable_value(all_data, biomass_demand_variables, "AIM-Technology", scenario_name, region_name)
+      Supply = get_region_variable_value(all_data, biomass_supply_variables, "AIM-Technology", scenario_name, region_name)
     )
   }))
 })) %>%
+  left_join(biomass_power_use_data, by = c("Scenario", "Region")) %>%
   left_join(biomass_trade_data, by = c("Scenario", "Region")) %>%
   mutate(
     across(c(Supply, Demand, Import, Export), ~replace_na(.x, 0)),
@@ -744,9 +776,9 @@ biomass_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_nam
     ExportYMax = TotalAvailable
   )
 
-biomass_source_levels <- c("Domestic supply", region_base)
+biomass_source_levels <- c("Supply limit", region_base)
 biomass_source_colors <- c(
-  "Domestic supply" = "#7fbf3f",
+  "Supply limit" = "#7fbf3f",
   setNames(grDevices::hcl.colors(length(region_base), palette = "Dark 3"), region_base)
 )
 
@@ -755,7 +787,7 @@ make_biomass_bar_data <- function(balance_row, imports) {
     transmute(
       Scenario,
       Region,
-      SourceRegion = "Domestic supply",
+      SourceRegion = "Supply limit",
       Value = Supply
     )
 
@@ -1391,7 +1423,7 @@ plot_biomass_balance_region <- function(balance_df, import_df, scenario_name, re
   p <- p +
     geom_point(
       data = d,
-      aes(x = 1, y = Demand, shape = "AIM-Tech demand"),
+      aes(x = 1, y = Demand, shape = "Power generation use"),
       inherit.aes = FALSE,
       size = 2.2,
       stroke = 0.4,
@@ -1399,7 +1431,7 @@ plot_biomass_balance_region <- function(balance_df, import_df, scenario_name, re
       color = "black"
     ) +
     scale_fill_manual(values = biomass_source_colors, drop = FALSE) +
-    scale_shape_manual(values = c("AIM-Tech demand" = 23), name = NULL) +
+    scale_shape_manual(values = c("Power generation use" = 23), name = NULL) +
     scale_x_continuous(breaks = 1, labels = "Biomass", limits = c(0.45, 1.55)) +
     expand_limits(y = 0)
 
@@ -1409,8 +1441,8 @@ plot_biomass_balance_region <- function(balance_df, import_df, scenario_name, re
 
   p +
     labs(
-      y = expression(paste("Biomass balance (EJ ", {yr^-1}, ")")),
-      title = "Biomass balance: 2050"
+      y = expression(paste("Biomass availability and use (EJ ", {yr^-1}, ")")),
+      title = "Biomass: 2050"
     ) +
     carrier_plot_theme +
     theme(

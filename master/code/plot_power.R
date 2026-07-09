@@ -44,7 +44,7 @@ region_list <- c(
   "XAF", "XNF"
 )
 
-target_scenarios <- c("NPi500", "NPi500-ZF2050")
+target_scenarios <- c("NPi500", "NPi500-ZF2050", "NPi500-LimCCS_bio")
 target_years <- seq(2005, 2050, by = 5)
 base_dir <- file.path(project_dir, "output", "global_260617")
 
@@ -669,12 +669,28 @@ scenario_linetype <- setNames(
   target_scenarios
 )
 
+scenario_psm_color <- setNames(
+  rep(c("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#56B4E9"), length.out = length(target_scenarios)),
+  target_scenarios
+)
+scenario_series_levels <- c("AIM-Technology", paste("PSM", target_scenarios, sep = ": "))
+scenario_series_colors <- c(
+  "AIM-Technology" = "black",
+  setNames(unname(scenario_psm_color[target_scenarios]), paste("PSM", target_scenarios, sep = ": "))
+)
+
 prep_scenario_line_data <- function(d, value_col = "Value") {
   d %>%
     mutate(
       Scenario = factor(as.character(Scenario), levels = target_scenarios),
       Model = factor(as.character(Model), levels = names(model_color)),
-      Region = factor(as.character(Region), levels = region_list_plot)
+      Region = factor(as.character(Region), levels = region_list_plot),
+      ScenarioSeries = if_else(
+        as.character(Model) == "AIM-Technology",
+        "AIM-Technology",
+        paste("PSM", as.character(Scenario), sep = ": ")
+      ),
+      ScenarioSeries = factor(ScenarioSeries, levels = scenario_series_levels)
     ) %>%
     filter(!is.na(.data[[value_col]]))
 }
@@ -689,7 +705,7 @@ save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, wid
     aes(
       x = Year,
       y = .data[[y_col]],
-      color = Model,
+      color = ScenarioSeries,
       linetype = Scenario,
       shape = Scenario,
       group = interaction(Region, Model, Scenario)
@@ -698,7 +714,7 @@ save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, wid
     geom_line(linewidth = 0.35) +
     geom_point(size = 1.8, stroke = 0.5) +
     expand_limits(y = 0) +
-    scale_color_manual(values = model_color, drop = TRUE, name = "Model") +
+    scale_color_manual(values = scenario_series_colors, drop = TRUE, name = "Series") +
     scale_linetype_manual(values = scenario_linetype, drop = TRUE, name = "Scenario") +
     scale_shape_manual(values = scenario_shape, drop = TRUE, name = "Scenario") +
     facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
