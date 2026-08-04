@@ -32,17 +32,17 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 }
 
 aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink_Sc"
-region <- "Global"
-date <- "2606171718"
+scenario_group <- if (exists("trading_scenario_group", inherits = TRUE)) trading_scenario_group else "global_softlink_Sc"
+region <- if (exists("trading_region", inherits = TRUE)) trading_region else "Global"
+date <- if (exists("trading_run_token", inherits = TRUE)) trading_run_token else "2607301357"
 plot_year <- 2050
-scenarios <- c("NPi500-LimCCS_bio")
+scenarios <- if (exists("trading_scenarios", inherits = TRUE)) trading_scenarios else c("Baseline", "NPi500")
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 main_dir <- file.path(ddir, "main")
 merged_gdx_path <- file.path(main_dir, "merged_output.gdx")
-base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_260617")
+base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_2607301357_12DAY")
 
 node_path <- if (exists("trading_node_geojson_path", inherits = TRUE)) {
   trading_node_geojson_path
@@ -112,8 +112,11 @@ region_boundaries <- if (exists("trading_region_boundaries", inherits = TRUE)) {
   build_region_boundaries()
 }
 gwh_to_ej <- 3.6e-6
-time_slice_hours <- 6
-annual_flow_multiplier <- time_slice_hours
+annual_flow_multiplier <- if (exists("trading_primary_time_weight", inherits = TRUE)) {
+  trading_primary_time_weight
+} else {
+  ceiling(365 / 12 * 1000) / 1000
+}
 
 network_flow_specs <- tribble(
   ~Symbol, ~Direction,
@@ -132,7 +135,7 @@ read_h2_link_value <- function(scenario_name, flow_spec) {
 
   read_gdx_param(gdx_path, value_symbol) %>%
     mutate(across(where(is.factor), as.character)) %>%
-    filter(str_detect(L, ".*-H2_.*-H2$")) %>%
+    filter(str_detect(L, ".*-H2TRD_.*-H2TRD$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
     mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
@@ -141,8 +144,8 @@ read_h2_link_value <- function(scenario_name, flow_spec) {
     mutate(
       Scenario = scenario_name,
       Symbol = value_symbol,
-      N0 = N0 %>% str_remove_all(fixed("-H2")) %>% str_remove("^R31-"),
-      N1 = N1 %>% str_remove_all(fixed("-H2")) %>% str_remove("^R31-"),
+      N0 = N0 %>% str_remove(fixed("-H2TRD")) %>% str_remove("^R31-"),
+      N1 = N1 %>% str_remove(fixed("-H2TRD")) %>% str_remove("^R31-"),
       N0_plot = if (direction == "backward") N1 else N0,
       N1_plot = if (direction == "backward") N0 else N1,
       N0 = N0_plot,
@@ -162,7 +165,7 @@ read_nh3_trade_value <- function(scenario_name, flow_spec) {
 
   df_link <- read_gdx_param(gdx_path, value_symbol) %>%
     mutate(across(where(is.factor), as.character)) %>%
-    filter(str_detect(L, "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$")) %>%
+    filter(str_detect(L, "^R31-[A-Z0-9]+-NH3TRD_R31-[A-Z0-9]+-NH3TRD$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
     mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
@@ -172,7 +175,7 @@ read_nh3_trade_value <- function(scenario_name, flow_spec) {
     return(tibble(L = character(), Value = numeric(), Scenario = character(), Symbol = character(), N0 = character(), N1 = character()))
   }
 
-  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3_R31-([A-Z0-9]+)-NH3$")
+  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-NH3TRD_R31-([A-Z0-9]+)-NH3TRD$")
 
   df_link %>%
     mutate(
@@ -199,7 +202,7 @@ read_syf_trade_value <- function(scenario_name, flow_spec) {
 
   df_link <- read_gdx_param(gdx_path, value_symbol) %>%
     mutate(across(where(is.factor), as.character)) %>%
-    filter(str_detect(L, "^R31-[A-Z0-9]+-SYF_R31-[A-Z0-9]+-SYF$")) %>%
+    filter(str_detect(L, "^R31-[A-Z0-9]+-SYFTRD_R31-[A-Z0-9]+-SYFTRD$")) %>%
     group_by(L) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
     mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
@@ -209,7 +212,7 @@ read_syf_trade_value <- function(scenario_name, flow_spec) {
     return(tibble(L = character(), Value = numeric(), Scenario = character(), Symbol = character(), N0 = character(), N1 = character()))
   }
 
-  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-SYF_R31-([A-Z0-9]+)-SYF$")
+  link_nodes <- str_match(df_link$L, "^R31-([A-Z0-9]+)-SYFTRD_R31-([A-Z0-9]+)-SYFTRD$")
 
   df_link %>%
     mutate(

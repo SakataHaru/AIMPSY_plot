@@ -7,11 +7,24 @@ script_dir <- if (length(script_path) > 0) {
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 }
 
-project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
-  script_dir
-} else {
-  normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = FALSE)
+project_candidates <- unique(c(
+  script_dir,
+  file.path(script_dir, "master"),
+  file.path(script_dir, "AIMPSY_plot", "master"),
+  file.path(script_dir, ".."),
+  file.path(script_dir, "..", "master"),
+  file.path(script_dir, "..", "AIMPSY_plot", "master")
+))
+project_matches <- project_candidates[
+  file.exists(file.path(project_candidates, "code", "dataframe.R"))
+]
+if (length(project_matches) == 0) {
+  stop(
+    "Could not locate the AIMPSY_plot/master project containing code/dataframe.R. Checked: ",
+    paste(project_candidates, collapse = ", ")
+  )
 }
+project_dir <- normalizePath(project_matches[[1]], winslash = "/", mustWork = TRUE)
 
 old_wd <- getwd()
 setwd(project_dir)
@@ -35,8 +48,41 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 
 trading_project_dir <- project_dir
 trading_data_dir <- file.path(trading_project_dir, "data")
-trading_base_dir <- file.path(trading_project_dir, "output", "global_260617")
 trading_aimpsy_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+trading_scenario_group <- "global_softlink_Sc"
+trading_region <- "Global"
+trading_run_token <- "2608031904"
+trading_scenarios <- c("NPi500")
+trading_base_scenario <- "Baseline"
+
+primary_time_weight_from_timeresol <- function(timeresol) {
+  timeresol <- toupper(trimws(timeresol))
+  weights <- c(
+    "12DAY" = ceiling(365 / 12 * 1000) / 1000,
+    "6HOUR" = 6,
+    "4HOUR" = 4,
+    "3HOUR" = 3,
+    "1HOUR" = 1
+  )
+
+  if (!timeresol %in% names(weights)) {
+    stop(
+      "Unsupported timeresol: ", timeresol,
+      ". Supported values: ", paste(names(weights), collapse = ", ")
+    )
+  }
+
+  unname(weights[[timeresol]])
+}
+
+timeresol <- "12DAY"
+trading_primary_time_weight <- primary_time_weight_from_timeresol(timeresol)
+trading_base_dir <- file.path(
+  trading_project_dir,
+  "output",
+  paste0("global_", trading_run_token, "_", timeresol)
+)
+
 trading_node_geojson_path <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
 trading_node_csv_path <- file.path(trading_data_dir, "AIM_R31_NH3_trade_nodes.csv")
 trading_searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
@@ -230,7 +276,6 @@ plot_scripts <- file.path(
   c(
     "plot_link.R",
     "plot_trade.R",
-    "plot_trade_diff.R",
     "plot_network.R"
   )
 )

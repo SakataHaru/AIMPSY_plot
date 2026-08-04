@@ -31,23 +31,27 @@ read_gdx_param <- if (exists("trading_read_gdx_param", inherits = TRUE)) {
 #}
 
 aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink_Sc"
-region <- "Global"
-date <- "2606171718"
-scenarios <- c("NPi500-LimCCS_bio")
+scenario_group <- if (exists("trading_scenario_group", inherits = TRUE)) trading_scenario_group else "global_softlink_Sc"
+region <- if (exists("trading_region", inherits = TRUE)) trading_region else "Global"
+date <- if (exists("trading_run_token", inherits = TRUE)) trading_run_token else "2607301357"
+scenarios <- if (exists("trading_scenarios", inherits = TRUE)) trading_scenarios else c("Baseline", "NPi500")
 plot_year <- 2050
 
 ddir <- file.path(aimpsy, scenario_group, region, date)
 prm_dir <- file.path(ddir, "gams_output", "gdx_primary")
 
 data_dir <- if (exists("trading_data_dir", inherits = TRUE)) trading_data_dir else "data"
-base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_260617")
+base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_2607301357_12DAY")
 gwh_to_ej <- 3.6e-6
-time_slice_hours <- 6
+primary_time_weight <- if (exists("trading_primary_time_weight", inherits = TRUE)) {
+  trading_primary_time_weight
+} else {
+  ceiling(365 / 12 * 1000) / 1000
+}
 link_types <- tribble(
   ~LinkType, ~Pattern,          ~NodeSuffix, ~Folder,       ~FileTag, ~TitleLabel,      ~Palette,
   "AC",      ".*-AC_.*-AC$",    "-AC",       "plot_link_ele","AC",    "AC",            "plasma",
-  "H2",      ".*-H2_.*-H2$",    "-H2",       "plot_link_h2","H2",     "H2 pipeline",   "viridis"
+  "H2",      ".*-H2TRD_.*-H2TRD$", "-H2TRD", "plot_link_h2","H2",     "H2 pipeline",   "viridis"
 )
 
 value_specs <- tribble(
@@ -70,14 +74,14 @@ is_link_annual_flow <- function(value_spec = NULL) {
 }
 
 link_value_multiplier <- function(link_spec, value_spec) {
-  time_multiplier <- if (is_link_annual_flow(value_spec)) time_slice_hours else 1
+  time_multiplier <- if (is_link_annual_flow(value_spec)) primary_time_weight else 1
   unit_multiplier <- if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
 
   time_multiplier * unit_multiplier
 }
 
 link_arrow_threshold <- function(link_spec, value_spec = NULL) {
-  time_multiplier <- if (is_link_annual_flow(value_spec)) time_slice_hours else 1
+  time_multiplier <- if (is_link_annual_flow(value_spec)) primary_time_weight else 1
   unit_multiplier <- if (is_h2_annual_flow(link_spec, value_spec)) gwh_to_ej else 1
 
   arrow_threshold * time_multiplier * unit_multiplier
@@ -735,8 +739,17 @@ plot_link_demand_overlay <- function(map_data, edges_sf, scenario_name, link_spe
   plot_arrow_threshold <- link_arrow_threshold(link_spec)
   legend_title <- link_flow_legend_title(link_spec, combined = TRUE)
   flow_labels <- link_flow_labeler(link_spec)(brks)
-  edges_line_df <- edges_plot_df %>% filter(Value <= plot_arrow_threshold)
-  edges_arrow_df <- edges_plot_df %>% filter(Value > plot_arrow_threshold)
+  show_flow_arrows <- link_spec$LinkType != "AC"
+  edges_line_df <- if (show_flow_arrows) {
+    edges_plot_df %>% filter(Value <= plot_arrow_threshold)
+  } else {
+    edges_plot_df
+  }
+  edges_arrow_df <- if (show_flow_arrows) {
+    edges_plot_df %>% filter(Value > plot_arrow_threshold)
+  } else {
+    edges_plot_df %>% slice(0)
+  }
 
   ggplot() +
     geom_sf(data = plot_data, aes(fill = Value), color = "grey35", linewidth = 0.3) +

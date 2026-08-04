@@ -25,12 +25,12 @@ project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
 
 source(file.path(project_dir, "code", "dataframe.R"))
 
-psm_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink_Sc/Global/2606171718/main"
+psm_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink_Sc/Global/2608031904/main"
 aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
 
-target_scenarios <- c("NPi500-LimCCS_bio")
+target_scenarios <- c("NPi500")
 time_years <- seq(2020, 2050, by = 5)
-base_dir <- file.path(project_dir, "output", "global_260617")
+base_dir <- file.path(project_dir, "output", "global_2608031904_12DAY(fe_scale=off)")
 
 region_list <- c(
   "World",

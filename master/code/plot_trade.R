@@ -32,13 +32,13 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 }
 
 aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink_Sc"
-region <- "Global"
-date <- "2606171718"
+scenario_group <- if (exists("trading_scenario_group", inherits = TRUE)) trading_scenario_group else "global_softlink_Sc"
+region <- if (exists("trading_region", inherits = TRUE)) trading_region else "Global"
+date <- if (exists("trading_run_token", inherits = TRUE)) trading_run_token else "2607301357"
 plot_year <- 2050
-scenarios <- c("NPi500-LimCCS_bio")
+scenarios <- if (exists("trading_scenarios", inherits = TRUE)) trading_scenarios else c("Baseline", "NPi500")
 
-base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_260617")
+base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path("output", "global_2607301357_12DAY")
 
 build_region_map <- function() {
   tribble(
@@ -132,8 +132,11 @@ searoute_dir <- if (exists("trading_searoute_dir", inherits = TRUE)) {
 }
 searoute_path <- file.path(searoute_dir, "searoute.geojson")
 gwh_to_ej <- 3.6e-6
-time_slice_hours <- 6
-annual_flow_multiplier <- time_slice_hours
+annual_flow_multiplier <- if (exists("trading_primary_time_weight", inherits = TRUE)) {
+  trading_primary_time_weight
+} else {
+  ceiling(365 / 12 * 1000) / 1000
+}
 searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
 arrow_threshold <- 10 * annual_flow_multiplier * gwh_to_ej
 
@@ -144,27 +147,31 @@ flow_specs <- tribble(
 )
 
 overlay_specs <- tribble(
-  ~Carrier, ~Folder,           ~TitleLabel,     ~LinkPattern,                                  ~FlowLow,  ~FlowHigh,
-  "NH3",    "plot_trade_nh3",  "NH3 trade",    "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",       "#f1b6da", "#c51b7d",
-  "BMS",    "plot_trade_bio",  "Biomass trade", "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$",      "#b2e2e2", "#006d77"
+  ~Carrier, ~TradeTag, ~Folder,          ~TitleLabel,      ~LinkPattern,                                             ~FlowLow,  ~FlowHigh,
+  "NH3",    "NH3TRD",  "plot_trade_nh3", "NH3 trade",     "^R31-[A-Z0-9]+-NH3TRD_R31-[A-Z0-9]+-NH3TRD$",          "#f1b6da", "#c51b7d",
+  "BMS",    "BMSTRD",  "plot_trade_bio", "Biomass trade", "^R31-[A-Z0-9]+-BMSTRD_R31-[A-Z0-9]+-BMSTRD$",          "#b2e2e2", "#006d77",
+  "SYF",    "SYFTRD",  "plot_trade_syf", "Synfuel trade", "^R31-[A-Z0-9]+-SYFTRD_R31-[A-Z0-9]+-SYFTRD$",          "#b2dfdb", "#00796b"
 )
 
 trade_map_specs <- tibble(
-  Carrier = c("NH3", "BMS"),
+  Carrier = c("NH3", "BMS", "SYF"),
   DemandVariables = list(
     "Sec_Ene_Hyd_Amm",
-    c("Sec_Ene_Ele_Bio_wo_CCS", "Sec_Ene_Ele_Bio_w_CCS")
+    c("Sec_Ene_Ele_Bio_wo_CCS", "Sec_Ene_Ele_Bio_w_CCS"),
+    "Sec_Ene_Hyd_Syn"
   ),
   MapLabel = c(
     "Ammonia demand",
-    "Biomass power generation"
+    "Biomass power generation",
+    "Synfuel production"
   ),
   LegendTitle = c(
     "Sec_Ene_Hyd_Amm (EJ/yr)",
-    "Biomass power generation (EJ/yr)"
+    "Biomass power generation (EJ/yr)",
+    "Sec_Ene_Hyd_Syn (EJ/yr)"
   ),
-  FillLow = c("#fbf7ff", "#f7fcf5"),
-  FillHigh = c("#54278f", "#006d2c")
+  FillLow = c("#fbf7ff", "#f7fcf5", "#e0f2f1"),
+  FillHigh = c("#54278f", "#006d2c", "#00796b")
 )
 
 read_trade_map_values <- function(gdx_path, map_specs) {
@@ -266,7 +273,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
 
   link_nodes <- str_match(
     df_link$L,
-    paste0("^R31-([A-Z0-9]+)-", overlay_spec$Carrier, "_R31-([A-Z0-9]+)-", overlay_spec$Carrier, "$")
+    paste0("^R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "_R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "$")
   )
 
   df_link <- df_link %>%

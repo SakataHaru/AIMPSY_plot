@@ -32,12 +32,13 @@ for (gams_sys_dir in c("C:/GAMS/38", "C:/GAMS/win64/26.1")) {
 }
 
 aimpsy <- if (exists("trading_aimpsy_dir", inherits = TRUE)) trading_aimpsy_dir else "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
-scenario_group <- "global_softlink_Sc"
-region <- "Global"
-date <- "2606171718"
+scenario_group <- if (exists("trading_scenario_group", inherits = TRUE)) trading_scenario_group else "global_softlink_Sc"
+region <- if (exists("trading_region", inherits = TRUE)) trading_region else "Global"
+date <- if (exists("trading_run_token", inherits = TRUE)) trading_run_token else "2607301357"
 plot_year <- 2050
-base_scenario <- "NPi500"
-scenarios <- c("NPi500-LimCCS_bio")
+base_scenario <- if (exists("trading_base_scenario", inherits = TRUE)) trading_base_scenario else "Baseline"
+all_scenarios <- if (exists("trading_scenarios", inherits = TRUE)) trading_scenarios else c("Baseline", "NPi500")
+scenarios <- setdiff(all_scenarios, base_scenario)
 
 script_args <- commandArgs(trailingOnly = FALSE)
 script_path <- sub("^--file=", "", script_args[grepl("^--file=", script_args)])
@@ -54,7 +55,7 @@ if (length(script_path) == 0) {
 }
 script_path <- normalizePath(script_path[1])
 project_dir <- normalizePath(file.path(dirname(script_path), ".."))
-base_dir <- file.path(project_dir, "output", "global_260617")
+base_dir <- if (exists("trading_base_dir", inherits = TRUE)) trading_base_dir else file.path(project_dir, "output", "global_2607301357_12DAY")
 scenario_analysis_dir <- file.path(base_dir, "scenario_anarysis")
 
 build_region_map <- function() {
@@ -154,8 +155,11 @@ node_csv <- if (exists("trading_node_csv_path", inherits = TRUE)) {
   file.path("data", "AIM_R31_NH3_trade_nodes.csv")
 }
 gwh_to_ej <- 3.6e-6
-time_slice_hours <- 6
-annual_flow_multiplier <- time_slice_hours
+annual_flow_multiplier <- if (exists("trading_primary_time_weight", inherits = TRUE)) {
+  trading_primary_time_weight
+} else {
+  ceiling(365 / 12 * 1000) / 1000
+}
 arrow_threshold <- 10 * annual_flow_multiplier * gwh_to_ej
 
 flow_specs <- tribble(
@@ -165,9 +169,9 @@ flow_specs <- tribble(
 )
 
 overlay_specs <- tribble(
-  ~Carrier, ~Folder,           ~TitleLabel,      ~LinkPattern,
-  "NH3",    "plot_trade_nh3",  "NH3 trade",      "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",
-  "BMS",    "plot_trade_bio",  "Biomass trade",  "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$"
+  ~Carrier, ~TradeTag, ~Folder,          ~TitleLabel,      ~LinkPattern,
+  "NH3",    "NH3TRD",  "plot_trade_nh3", "NH3 trade",     "^R31-[A-Z0-9]+-NH3TRD_R31-[A-Z0-9]+-NH3TRD$",
+  "BMS",    "BMSTRD",  "plot_trade_bio", "Biomass trade", "^R31-[A-Z0-9]+-BMSTRD_R31-[A-Z0-9]+-BMSTRD$"
 )
 
 transmission_capacity_specs <- tribble(
@@ -200,7 +204,7 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
 
   link_nodes <- str_match(
     df_link$L,
-    paste0("^R31-([A-Z0-9]+)-", overlay_spec$Carrier, "_R31-([A-Z0-9]+)-", overlay_spec$Carrier, "$")
+    paste0("^R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "_R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "$")
   )
 
   df_link %>%
@@ -245,7 +249,7 @@ read_transport_capacity_value <- function(scenario_name, overlay_spec) {
 
   link_nodes <- str_match(
     df_link$L,
-    paste0("^R31-([A-Z0-9]+)-", overlay_spec$Carrier, "_R31-([A-Z0-9]+)-", overlay_spec$Carrier, "$")
+    paste0("^R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "_R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "$")
   )
 
   df_link %>%

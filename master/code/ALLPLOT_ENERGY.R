@@ -17,11 +17,25 @@ script_dir <- if (length(script_path) > 0) {
 } else {
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 }
-project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
-  script_dir
-} else {
-  normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = FALSE)
+
+project_candidates <- unique(c(
+  script_dir,
+  file.path(script_dir, "master"),
+  file.path(script_dir, "AIMPSY_plot", "master"),
+  file.path(script_dir, ".."),
+  file.path(script_dir, "..", "master"),
+  file.path(script_dir, "..", "AIMPSY_plot", "master")
+))
+project_matches <- project_candidates[
+  file.exists(file.path(project_candidates, "code", "dataframe.R"))
+]
+if (length(project_matches) == 0) {
+  stop(
+    "Could not locate the AIMPSY_plot/master project containing code/dataframe.R. Checked: ",
+    paste(project_candidates, collapse = ", ")
+  )
 }
+project_dir <- normalizePath(project_matches[[1]], winslash = "/", mustWork = TRUE)
 
 source(file.path(project_dir, "code", "dataframe.R"))
 
@@ -32,18 +46,40 @@ source(file.path(project_dir, "code", "dataframe.R"))
 #   }
 # }
 
-psm_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink_Sc/Global/2606171718/main"
+psm_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink_Sc/Global/2608031904/main"
 aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
 psm_primary_dir <- file.path(dirname(psm_main_dir), "gams_output", "gdx_primary")
 r272_map_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/AIMPSY-master/data/set/M_R272.csv"
 
-target_scenarios <- c("NPi500", "NPi500-ZF2050", "NPi500-LimCCS_bio")
+primary_time_weight_from_timeresol <- function(timeresol) {
+  timeresol <- toupper(trimws(timeresol))
+  weights <- c(
+    "12DAY" = ceiling(365 / 12 * 1000) / 1000,
+    "6HOUR" = 6,
+    "4HOUR" = 4,
+    "3HOUR" = 3,
+    "1HOUR" = 1
+  )
+
+  if (!timeresol %in% names(weights)) {
+    stop(
+      "Unsupported timeresol: ", timeresol,
+      ". Supported values: ", paste(names(weights), collapse = ", ")
+    )
+  }
+
+  unname(weights[[timeresol]])
+}
+
+timeresol <- "12DAY"
+primary_time_weight <- primary_time_weight_from_timeresol(timeresol)
+
+target_scenarios <- c("NPi500")
 plot_year <- 2050
 time_years <- seq(2020, 2050, by = 5)
-time_slice_hours <- 6
 gwh_to_ej <- 3.6e-6
 twh_to_ej <- 3.6 / 1000
-base_dir <- file.path(project_dir, "output", "global_260617")
+base_dir <- file.path(project_dir, "output", paste0("global_2608031904_", timeresol))
 
 region_list <- c(
   "World",
@@ -177,7 +213,7 @@ read_link_flow_symbol <- function(scenario_name, symbol, base_direction) {
     mutate(across(where(is.factor), as.character)) %>%
     filter(str_detect(L, ".*-AC_.*-AC$")) %>%
     group_by(L) %>%
-    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours / 1000, .groups = "drop") %>%
+    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * primary_time_weight / 1000, .groups = "drop") %>%
     filter(is.finite(Value), Value != 0) %>%
     separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
     mutate(
@@ -273,18 +309,18 @@ fuel_specs <- tribble(
   "Ammonia",
     list(list("Sec_Ene_Hyd_Amm")),
     list(list("Fin_Ene_Hyd_Amm")),
-    "^R31-[A-Z0-9]+-NH3_R31-[A-Z0-9]+-NH3$",
-    "-NH3$",
+    "^R31-[A-Z0-9]+-NH3TRD_R31-[A-Z0-9]+-NH3TRD$",
+    "-NH3TRD$",
   "Hydrogen",
     list(list("Sec_Ene_Hyd")),
     list(list("Fin_Ene_Hyd")),
-    ".*-H2_.*-H2$",
-    "-H2$",
+    ".*-H2TRD_.*-H2TRD$",
+    "-H2TRD$",
   "Synfuel",
     list("Sec_Ene_Hyd_syn"),
     list(c("Fin_Ene_Liq_Hyd_syn", "Fin_Ene_Gas_Hyd_syn")),
-    "^R31-[A-Z0-9]+-SYF_R31-[A-Z0-9]+-SYF$",
-    "-SYF$"
+    "^R31-[A-Z0-9]+-SYFTRD_R31-[A-Z0-9]+-SYFTRD$",
+    "-SYFTRD$"
 )
 fuel_levels <- fuel_specs$Fuel
 conversion_specs <- tribble(
@@ -333,6 +369,29 @@ get_region_variable_value <- function(df, variables, model_name, scenario_name, 
   0
 }
 
+get_model_consistent_demand_value <- function(df, fuel_spec, model_name, scenario_name, region_name) {
+  demand <- get_region_variable_value(
+    df,
+    fuel_spec$DemandVariables[[1]],
+    model_name,
+    scenario_name,
+    region_name
+  )
+
+  if (as.character(fuel_spec$Fuel) == "Hydrogen") {
+    ammonia_demand <- get_region_variable_value(
+      df,
+      "Fin_Ene_Hyd_Amm",
+      model_name,
+      scenario_name,
+      region_name
+    )
+    demand <- demand - ammonia_demand
+  }
+
+  max(demand, 0)
+}
+
 report_missing_variable_groups <- function(df, model_name, specs, column_name, value_label) {
   for (i in seq_len(nrow(specs))) {
     spec <- specs[i, ]
@@ -371,6 +430,21 @@ report_missing_variable_groups <- function(df, model_name, specs, column_name, v
 report_missing_variable_groups(all_data, "PSM", fuel_specs, "SupplyVariables", "supply")
 report_missing_variable_groups(all_data, "AIM-Technology", fuel_specs, "DemandVariables", "demand")
 
+for (scenario_name in target_scenarios) {
+  if (!any(
+    all_data$Model == "AIM-Technology" &
+      all_data$Scenario == scenario_name &
+      all_data$Year == plot_year &
+      str_to_lower(all_data$Variable) == str_to_lower("Fin_Ene_Hyd_Amm")
+  )) {
+    warning(
+      "No Fin_Ene_Hyd_Amm values found in AIM-Technology iamc_gdx / scenario ",
+      scenario_name,
+      ". Hydrogen direct demand requires Fin_Ene_Hyd - Fin_Ene_Hyd_Amm."
+    )
+  }
+}
+
 read_carrier_flow_symbol <- function(scenario_name, symbol, base_direction, fuel_spec) {
   gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
   if (!file.exists(gdx_path)) {
@@ -382,7 +456,7 @@ read_carrier_flow_symbol <- function(scenario_name, symbol, base_direction, fuel
     mutate(across(where(is.factor), as.character)) %>%
     filter(str_detect(L, fuel_spec$LinkPattern)) %>%
     group_by(L) %>%
-    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours * gwh_to_ej, .groups = "drop") %>%
+    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * primary_time_weight * gwh_to_ej, .groups = "drop") %>%
     filter(is.finite(Value), Value != 0) %>%
     separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
     mutate(
@@ -465,7 +539,7 @@ read_conversion_flow_symbol <- function(scenario_name, symbol, base_direction) {
     mutate(across(where(is.factor), as.character)) %>%
     filter(str_detect(L, conversion_link_pattern)) %>%
     group_by(L) %>%
-    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours * gwh_to_ej, .groups = "drop") %>%
+    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * primary_time_weight * gwh_to_ej, .groups = "drop") %>%
     filter(is.finite(Value), Value != 0)
 
   if (nrow(flows_raw) == 0) {
@@ -606,7 +680,7 @@ carrier_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_nam
         Region = region_name,
         Fuel = spec$Fuel,
         Supply = get_region_variable_value(all_data, spec$SupplyVariables[[1]], "PSM", scenario_name, region_name),
-        Demand = get_region_variable_value(all_data, spec$DemandVariables[[1]], "AIM-Technology", scenario_name, region_name)
+        Demand = get_model_consistent_demand_value(all_data, spec, "AIM-Technology", scenario_name, region_name)
       )
     }))
   }))
@@ -625,8 +699,8 @@ biomass_supply_variables <- list(
 )
 biomass_spec <- tibble(
   Fuel = "Biomass",
-  LinkPattern = "^R31-[A-Z0-9]+-BMS_R31-[A-Z0-9]+-BMS$",
-  NodeSuffixPattern = "-BMS$"
+  LinkPattern = "^R31-[A-Z0-9]+-BMSTRD_R31-[A-Z0-9]+-BMSTRD$",
+  NodeSuffixPattern = "-BMSTRD$"
 )
 
 read_biomass_flow_symbol <- function(scenario_name, symbol, base_direction) {
@@ -640,7 +714,7 @@ read_biomass_flow_symbol <- function(scenario_name, symbol, base_direction) {
     mutate(across(where(is.factor), as.character)) %>%
     filter(str_detect(L, biomass_spec$LinkPattern)) %>%
     group_by(L) %>%
-    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * time_slice_hours * gwh_to_ej, .groups = "drop") %>%
+    summarise(Value = sum(.data[[symbol]], na.rm = TRUE) * primary_time_weight * gwh_to_ej, .groups = "drop") %>%
     filter(is.finite(Value), Value != 0) %>%
     separate(L, sep = "_", into = c("N0", "N1"), remove = FALSE) %>%
     mutate(
@@ -1330,7 +1404,7 @@ plot_carrier_balance_region <- function(df, conversion_df, scenario_name, region
   p +
     geom_point(
       data = d,
-      aes(x = FuelX, y = Demand, shape = "AIM-Tech demand"),
+      aes(x = FuelX, y = Demand, shape = "AIM-Tech direct demand"),
       inherit.aes = FALSE,
       size = 2.2,
       stroke = 0.4,
@@ -1338,7 +1412,7 @@ plot_carrier_balance_region <- function(df, conversion_df, scenario_name, region
       color = "black"
     ) +
     scale_fill_manual(values = fuel_flow_colors, drop = FALSE) +
-    scale_shape_manual(values = c("AIM-Tech demand" = 23), name = NULL) +
+    scale_shape_manual(values = c("AIM-Tech direct demand" = 23), name = NULL) +
     scale_x_continuous(breaks = seq_along(fuel_levels), labels = c("NH3", "H2", "Syn")) +
     expand_limits(y = 0) +
     labs(
