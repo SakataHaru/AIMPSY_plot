@@ -30,7 +30,7 @@ aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softli
 
 target_scenarios <- c("NPi500")
 time_years <- seq(2020, 2050, by = 5)
-base_dir <- file.path(project_dir, "output", "global_2608031904_12DAY(fe_scale=off)")
+base_dir <- file.path(project_dir, "output", "global_2608031904_12DAY")
 
 region_list <- c(
   "World",

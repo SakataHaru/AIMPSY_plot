@@ -54,8 +54,16 @@ searoute_dir <- if (exists("trading_searoute_dir", inherits = TRUE)) {
 } else {
   "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 }
-searoute_path <- file.path(searoute_dir, "searoute.geojson")
-searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
+searoute_path <- if (exists("trading_searoute_path", inherits = TRUE)) {
+  trading_searoute_path
+} else {
+  file.path(searoute_dir, "searoute.geojson")
+}
+searoute_representative_path <- if (exists("trading_searoute_representative_path", inherits = TRUE)) {
+  trading_searoute_representative_path
+} else {
+  file.path(searoute_dir, "searoute_r31_representative.geojson")
+}
 
 arrow_threshold <- 10
 h2_color_low <- "#3182bd"
@@ -514,6 +522,28 @@ make_nh3_arrow_df <- function(edges_sf) {
   if (nrow(arrow_df) == 0) empty_arrow_df else arrow_df
 }
 
+prepare_sea_network_data <- function(sea_edges_sf) {
+  arrow_threshold_ej <- arrow_threshold * annual_flow_multiplier * gwh_to_ej
+  sea_plot_sf <- sea_edges_sf %>%
+    mutate(Value_plot = log10(1 + Value))
+  trade_nodes_df <- sea_plot_sf %>%
+    st_drop_geometry() %>%
+    transmute(N0, N1, x0, y0, x1, y1) %>%
+    { bind_rows(
+      transmute(., N_PSY = N0, lon = x0, lat = y0),
+      transmute(., N_PSY = N1, lon = x1, lat = y1)
+    ) } %>%
+    distinct(N_PSY, lon, lat)
+
+  list(
+    sea_route_df = make_sea_route_df(sea_plot_sf),
+    sea_arrow_df = make_nh3_arrow_df(
+      sea_plot_sf %>% filter(Value > arrow_threshold_ej)
+    ),
+    trade_nodes_df = trade_nodes_df
+  )
+}
+
 plot_network_overlay <- function(
   h2_edges_sf,
   sea_edges_sf,
@@ -522,7 +552,8 @@ plot_network_overlay <- function(
   sea_label,
   sea_color,
   sea_linetype = "solid",
-  flow_scale
+  flow_scale,
+  prepared_sea = NULL
 ) {
   if (nrow(h2_edges_sf) == 0 && nrow(sea_edges_sf) == 0) {
     warning("No plottable network links for scenario: ", scenario_name, " / ", sea_label)
@@ -544,21 +575,12 @@ plot_network_overlay <- function(
       mutate(FlowColor = h2_color)
   }
 
-  arrow_threshold_ej <- arrow_threshold * annual_flow_multiplier * gwh_to_ej
-
-  sea_plot_sf <- sea_edges_sf %>%
-    mutate(Value_plot = log10(1 + Value))
-  sea_route_df <- make_sea_route_df(sea_plot_sf)
-  sea_arrow_df <- make_nh3_arrow_df(sea_plot_sf %>% filter(Value > arrow_threshold_ej))
-
-  trade_nodes_df <- sea_plot_sf %>%
-    st_drop_geometry() %>%
-    transmute(N0, N1, x0, y0, x1, y1) %>%
-    { bind_rows(
-      transmute(., N_PSY = N0, lon = x0, lat = y0),
-      transmute(., N_PSY = N1, lon = x1, lat = y1)
-    ) } %>%
-    distinct(N_PSY, lon, lat)
+  if (is.null(prepared_sea)) {
+    prepared_sea <- prepare_sea_network_data(sea_edges_sf)
+  }
+  sea_route_df <- prepared_sea$sea_route_df
+  sea_arrow_df <- prepared_sea$sea_arrow_df
+  trade_nodes_df <- prepared_sea$trade_nodes_df
 
   plot_map_data <- h2_demand_map %>%
     filter(Scenario == scenario_name)
@@ -754,26 +776,20 @@ plot_sea_network_single <- function(
   sea_label,
   sea_color,
   sea_linetype = "solid",
-  flow_scale
+  flow_scale,
+  prepared_sea = NULL
 ) {
   if (nrow(sea_edges_sf) == 0) {
     warning("No plottable sea network links for scenario: ", scenario_name, " / ", sea_label)
     return(NULL)
   }
 
-  arrow_threshold_ej <- arrow_threshold * annual_flow_multiplier * gwh_to_ej
-  sea_plot_sf <- sea_edges_sf %>%
-    mutate(Value_plot = log10(1 + Value))
-  sea_route_df <- make_sea_route_df(sea_plot_sf)
-  sea_arrow_df <- make_nh3_arrow_df(sea_plot_sf %>% filter(Value > arrow_threshold_ej))
-  trade_nodes_df <- sea_plot_sf %>%
-    st_drop_geometry() %>%
-    transmute(N0, N1, x0, y0, x1, y1) %>%
-    { bind_rows(
-      transmute(., N_PSY = N0, lon = x0, lat = y0),
-      transmute(., N_PSY = N1, lon = x1, lat = y1)
-    ) } %>%
-    distinct(N_PSY, lon, lat)
+  if (is.null(prepared_sea)) {
+    prepared_sea <- prepare_sea_network_data(sea_edges_sf)
+  }
+  sea_route_df <- prepared_sea$sea_route_df
+  sea_arrow_df <- prepared_sea$sea_arrow_df
+  trade_nodes_df <- prepared_sea$trade_nodes_df
 
   plot_map_data <- h2_demand_map %>%
     filter(Scenario == scenario_name)
@@ -937,6 +953,9 @@ for (scenario_name in scenarios) {
   }) %>%
     make_nh3_edges_sf(nh3_nodes_tbl, sea_routes_sf)
 
+  nh3_prepared_sea <- prepare_sea_network_data(nh3_edges_sf)
+  syf_prepared_sea <- prepare_sea_network_data(syf_edges_sf)
+
   flow_scale <- make_common_flow_scale(c(h2_edges_sf$Value, nh3_edges_sf$Value, syf_edges_sf$Value))
 
   save_network_plot(
@@ -958,7 +977,8 @@ for (scenario_name in scenarios) {
       sea_label = "Ammonia sea trade",
       sea_color = nh3_color,
       sea_linetype = "solid",
-      flow_scale = flow_scale
+      flow_scale = flow_scale,
+      prepared_sea = nh3_prepared_sea
     ),
     network_dir,
     paste0("global_", scenario_name, "_nh3_network_", plot_year, ".png")
@@ -972,7 +992,8 @@ for (scenario_name in scenarios) {
       sea_label = "Synfuel sea trade",
       sea_color = syf_color,
       sea_linetype = "48",
-      flow_scale = flow_scale
+      flow_scale = flow_scale,
+      prepared_sea = syf_prepared_sea
     ),
     network_dir,
     paste0("global_", scenario_name, "_syf_network_", plot_year, ".png")
@@ -986,7 +1007,8 @@ for (scenario_name in scenarios) {
     sea_label = "Ammonia sea trade",
     sea_color = nh3_color,
     sea_linetype = "solid",
-    flow_scale = flow_scale
+    flow_scale = flow_scale,
+    prepared_sea = nh3_prepared_sea
   )
   save_network_plot(
     p_nh3,
@@ -1002,7 +1024,8 @@ for (scenario_name in scenarios) {
     sea_label = "Synfuel sea trade",
     sea_color = syf_color,
     sea_linetype = "48",
-    flow_scale = flow_scale
+    flow_scale = flow_scale,
+    prepared_sea = syf_prepared_sea
   )
   save_network_plot(
     p_syf,

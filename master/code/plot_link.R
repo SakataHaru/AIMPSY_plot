@@ -299,7 +299,11 @@ node_path <- if (exists("trading_node_geojson_path", inherits = TRUE)) {
 } else {
   "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/node/nodes_centroid.geojson"
 }
-node_csv <- file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
+node_csv <- if (exists("trading_node_csv_path", inherits = TRUE)) {
+  trading_node_csv_path
+} else {
+  file.path(data_dir, "AIM_R31_NH3_trade_nodes.csv")
+}
 
 if (exists("trading_link_nodes_tbl", inherits = TRUE)) {
   nodes_tbl <- trading_link_nodes_tbl
@@ -390,6 +394,69 @@ make_edges_sf <- function(df_link) {
   )
 
   st_sf(edges, geometry = st_sfc(lines_sfc, crs = 4326))
+}
+
+link_plot_cache <- new.env(parent = emptyenv())
+
+get_link_values <- function(scenario_name, link_spec, value_spec) {
+  cache_key <- paste(
+    "values",
+    scenario_name,
+    link_spec$LinkType,
+    value_spec$Symbol,
+    sep = "::"
+  )
+
+  if (!exists(cache_key, envir = link_plot_cache, inherits = FALSE)) {
+    value <- read_link_value(
+      scenario_name = scenario_name,
+      link_pattern = link_spec$Pattern,
+      node_suffix = link_spec$NodeSuffix,
+      value_spec = value_spec,
+      value_multiplier = link_value_multiplier(link_spec, value_spec)
+    )
+    assign(cache_key, value, envir = link_plot_cache)
+  }
+
+  get(cache_key, envir = link_plot_cache, inherits = FALSE)
+}
+
+get_link_edges <- function(scenario_name, link_spec, value_spec) {
+  cache_key <- paste(
+    "edges",
+    scenario_name,
+    link_spec$LinkType,
+    value_spec$Symbol,
+    sep = "::"
+  )
+
+  if (!exists(cache_key, envir = link_plot_cache, inherits = FALSE)) {
+    value <- get_link_values(scenario_name, link_spec, value_spec) %>%
+      make_edges_sf()
+    assign(cache_key, value, envir = link_plot_cache)
+  }
+
+  get(cache_key, envir = link_plot_cache, inherits = FALSE)
+}
+
+get_combined_link_edges <- function(scenario_name, link_spec, flow_specs) {
+  cache_key <- paste(
+    "combined_edges",
+    scenario_name,
+    link_spec$LinkType,
+    paste(flow_specs$Symbol, collapse = "+"),
+    sep = "::"
+  )
+
+  if (!exists(cache_key, envir = link_plot_cache, inherits = FALSE)) {
+    value <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
+      get_link_values(scenario_name, link_spec, flow_specs[j, ])
+    }) %>%
+      make_edges_sf()
+    assign(cache_key, value, envir = link_plot_cache)
+  }
+
+  get(cache_key, envir = link_plot_cache, inherits = FALSE)
 }
 
 plot_transmission <- function(edges_sf, scenario_name, link_spec, value_spec) {
@@ -556,14 +623,7 @@ walk(seq_len(nrow(link_types)), function(i) {
       plot_dir <- file.path(base_dir, scenario_name, spec$Folder, value_spec$Symbol)
       dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 
-      edges_sf <- read_link_value(
-        scenario_name = scenario_name,
-        link_pattern = spec$Pattern,
-        node_suffix = spec$NodeSuffix,
-        value_spec = value_spec,
-        value_multiplier = link_value_multiplier(spec, value_spec)
-      ) %>%
-        make_edges_sf()
+      edges_sf <- get_link_edges(scenario_name, spec, value_spec)
 
       p <- plot_transmission(
         edges_sf = edges_sf,
@@ -605,16 +665,7 @@ walk(seq_len(nrow(link_types)), function(i) {
     combined_dir <- file.path(base_dir, scenario_name, spec$Folder, "vff_l_vfb_l_combined")
     dir.create(combined_dir, recursive = TRUE, showWarnings = FALSE)
 
-    edges_combined_sf <- map_dfr(seq_len(nrow(flow_specs)), function(j) {
-        read_link_value(
-          scenario_name = scenario_name,
-          link_pattern = spec$Pattern,
-          node_suffix = spec$NodeSuffix,
-          value_spec = flow_specs[j, ],
-          value_multiplier = link_value_multiplier(spec, flow_specs[j, ])
-        )
-      }) %>%
-      make_edges_sf()
+    edges_combined_sf <- get_combined_link_edges(scenario_name, spec, flow_specs)
 
     p <- plot_combined_flow(
       edges_sf = edges_combined_sf,
@@ -858,16 +909,11 @@ if (file.exists(merged_gdx_path)) {
         bg = "white"
       )
 
-      edges_combined_sf <- map_dfr(seq_len(nrow(link_flow_specs)), function(j) {
-          read_link_value(
-            scenario_name = scenario_name,
-            link_pattern = link_spec$Pattern,
-            node_suffix = link_spec$NodeSuffix,
-            value_spec = link_flow_specs[j, ],
-            value_multiplier = link_value_multiplier(link_spec, link_flow_specs[j, ])
-          )
-        }) %>%
-        make_edges_sf()
+      edges_combined_sf <- get_combined_link_edges(
+        scenario_name,
+        link_spec,
+        link_flow_specs
+      )
 
       p_overlay <- plot_link_demand_overlay(
         map_data = link_demand_map_data,

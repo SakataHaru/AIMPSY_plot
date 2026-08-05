@@ -89,6 +89,15 @@ trading_searoute_dir <- "C:/Users/Haru Sakata/OneDrive - Kyoto University/My wor
 trading_searoute_path <- file.path(trading_searoute_dir, "searoute.geojson")
 trading_searoute_representative_path <- file.path(trading_searoute_dir, "searoute_r31_representative.geojson")
 
+message("Trading input run: ", file.path(
+  trading_aimpsy_dir,
+  trading_scenario_group,
+  trading_region,
+  trading_run_token
+))
+message("Trading scenarios: ", paste(trading_scenarios, collapse = ", "))
+message("Trading output: ", trading_base_dir)
+
 trading_cache <- new.env(parent = emptyenv())
 
 trading_cache_get <- function(key, loader) {

@@ -130,14 +130,22 @@ searoute_dir <- if (exists("trading_searoute_dir", inherits = TRUE)) {
 } else {
   "C:/Users/Haru Sakata/OneDrive - Kyoto University/My work/AIM-PSY/data/searoute"
 }
-searoute_path <- file.path(searoute_dir, "searoute.geojson")
+searoute_path <- if (exists("trading_searoute_path", inherits = TRUE)) {
+  trading_searoute_path
+} else {
+  file.path(searoute_dir, "searoute.geojson")
+}
 gwh_to_ej <- 3.6e-6
 annual_flow_multiplier <- if (exists("trading_primary_time_weight", inherits = TRUE)) {
   trading_primary_time_weight
 } else {
   ceiling(365 / 12 * 1000) / 1000
 }
-searoute_representative_path <- file.path(searoute_dir, "searoute_r31_representative.geojson")
+searoute_representative_path <- if (exists("trading_searoute_representative_path", inherits = TRUE)) {
+  trading_searoute_representative_path
+} else {
+  file.path(searoute_dir, "searoute_r31_representative.geojson")
+}
 arrow_threshold <- 10 * annual_flow_multiplier * gwh_to_ej
 
 flow_specs <- tribble(
@@ -146,11 +154,13 @@ flow_specs <- tribble(
   "vfb_l", "backward"
 )
 
-overlay_specs <- tribble(
-  ~Carrier, ~TradeTag, ~Folder,          ~TitleLabel,      ~LinkPattern,                                             ~FlowLow,  ~FlowHigh,
-  "NH3",    "NH3TRD",  "plot_trade_nh3", "NH3 trade",     "^R31-[A-Z0-9]+-NH3TRD_R31-[A-Z0-9]+-NH3TRD$",          "#f1b6da", "#c51b7d",
-  "BMS",    "BMSTRD",  "plot_trade_bio", "Biomass trade", "^R31-[A-Z0-9]+-BMSTRD_R31-[A-Z0-9]+-BMSTRD$",          "#b2e2e2", "#006d77",
-  "SYF",    "SYFTRD",  "plot_trade_syf", "Synfuel trade", "^R31-[A-Z0-9]+-SYFTRD_R31-[A-Z0-9]+-SYFTRD$",          "#b2dfdb", "#00796b"
+overlay_specs <- tibble(
+  Carrier = c("NH3", "BMS", "SYF"),
+  TradeTags = list("NH3TRD", c("BMSTRD", "CRNTRD"), "SYFTRD"),
+  Folder = c("plot_trade_nh3", "plot_trade_bio", "plot_trade_syf"),
+  TitleLabel = c("NH3 trade", "Biomass trade", "Synfuel trade"),
+  FlowLow = c("#f1b6da", "#b2e2e2", "#b2dfdb"),
+  FlowHigh = c("#c51b7d", "#006d77", "#00796b")
 )
 
 trade_map_specs <- tibble(
@@ -249,14 +259,40 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
 
   value_symbol <- flow_spec$Symbol
   direction <- flow_spec$Direction
+  trade_tags <- overlay_spec$TradeTags[[1]]
+  link_pattern <- paste0(
+    "^R31-[A-Z0-9]+-",
+    trade_tags,
+    "_R31-[A-Z0-9]+-",
+    trade_tags,
+    "$",
+    collapse = "|"
+  )
 
   df_raw <- read_gdx_param(flow_gdx_path, value_symbol) %>%
     mutate(across(where(is.factor), as.character)) %>%
-    filter(str_detect(L, overlay_spec$LinkPattern))
+    filter(str_detect(L, link_pattern))
+
+  link_nodes <- str_match(
+    df_raw$L,
+    "^R31-([A-Z0-9]+)-[A-Z0-9]+_R31-([A-Z0-9]+)-[A-Z0-9]+$"
+  )
 
   df_link <- df_raw %>%
-    group_by(L) %>%
+    mutate(
+      N0 = link_nodes[, 2],
+      N1 = link_nodes[, 3]
+    ) %>%
+    # Combine all configured carrier components (BMSTRD + CRNTRD for biomass)
+    # before converting the annual flow and drawing a single route.
+    group_by(N0, N1) %>%
     summarise(Value = sum(.data[[value_symbol]], na.rm = TRUE), .groups = "drop") %>%
+    mutate(
+      L = paste0(
+        "R31-", N0, "-", overlay_spec$Carrier,
+        "TRD_R31-", N1, "-", overlay_spec$Carrier, "TRD"
+      )
+    ) %>%
     mutate(Value = Value * annual_flow_multiplier * gwh_to_ej) %>%
     filter(Value > 0)
 
@@ -270,17 +306,6 @@ read_transport_value <- function(scenario_name, overlay_spec, flow_spec) {
       N1 = character()
     ))
   }
-
-  link_nodes <- str_match(
-    df_link$L,
-    paste0("^R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "_R31-([A-Z0-9]+)-", overlay_spec$TradeTag, "$")
-  )
-
-  df_link <- df_link %>%
-    mutate(
-      N0 = link_nodes[, 2],
-      N1 = link_nodes[, 3]
-    )
 
   df_link %>%
     mutate(
@@ -535,7 +560,34 @@ add_trade_arrows <- function(p, arrow_df) {
   p
 }
 
-plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NULL, map_spec = NULL) {
+prepare_trade_flow_data <- function(edges_sf) {
+  edges_plot_sf <- edges_sf %>%
+    mutate(Value_plot = log10(1 + Value))
+  edges_plot_df <- edges_plot_sf %>%
+    st_drop_geometry()
+  edges_arrow_sf <- edges_plot_sf %>%
+    filter(Value > arrow_threshold)
+  route_nodes_df <- bind_rows(
+    edges_plot_df %>% transmute(N_PSY = N0, lon = x0, lat = y0),
+    edges_plot_df %>% transmute(N_PSY = N1, lon = x1, lat = y1)
+  ) %>%
+    distinct(N_PSY, lon, lat)
+
+  list(
+    route_nodes_df = route_nodes_df,
+    sea_route_line_df = make_sea_route_df(edges_plot_sf),
+    sea_route_arrow_df = make_route_arrow_df(edges_arrow_sf)
+  )
+}
+
+plot_trade_flow <- function(
+  edges_sf,
+  scenario_name,
+  overlay_spec,
+  map_data = NULL,
+  map_spec = NULL,
+  prepared_flow = NULL
+) {
   if (nrow(edges_sf) == 0) {
     warning("No plottable trade links for scenario: ", scenario_name, " / ", overlay_spec$Carrier)
     return(NULL)
@@ -544,18 +596,12 @@ plot_trade_flow <- function(edges_sf, scenario_name, overlay_spec, map_data = NU
   vmax <- max(edges_sf$Value, na.rm = TRUE)
   brks <- make_flow_breaks(vmax)
 
-  edges_plot_sf <- edges_sf %>%
-    mutate(Value_plot = log10(1 + Value))
-  edges_plot_df <- edges_plot_sf %>%
-    st_drop_geometry()
-  edges_arrow_sf <- edges_plot_sf %>% filter(Value > arrow_threshold)
-  route_nodes_df <- bind_rows(
-    edges_plot_df %>% transmute(N_PSY = N0, lon = x0, lat = y0),
-    edges_plot_df %>% transmute(N_PSY = N1, lon = x1, lat = y1)
-  ) %>%
-    distinct(N_PSY, lon, lat)
-  sea_route_line_df <- make_sea_route_df(edges_plot_sf)
-  sea_route_arrow_df <- make_route_arrow_df(edges_arrow_sf)
+  if (is.null(prepared_flow)) {
+    prepared_flow <- prepare_trade_flow_data(edges_sf)
+  }
+  route_nodes_df <- prepared_flow$route_nodes_df
+  sea_route_line_df <- prepared_flow$sea_route_line_df
+  sea_route_arrow_df <- prepared_flow$sea_route_arrow_df
 
   p <- ggplot()
 
@@ -708,11 +754,13 @@ for (i in seq_len(nrow(overlay_specs))) {
       )
     }) %>%
       make_transport_edges_sf(trade_port_nodes_tbl, sea_routes_sf)
+    prepared_flow <- prepare_trade_flow_data(edges_combined_sf)
 
     p <- plot_trade_flow(
       edges_sf = edges_combined_sf,
       scenario_name = scenario_name,
-      overlay_spec = overlay_spec
+      overlay_spec = overlay_spec,
+      prepared_flow = prepared_flow
     )
     if (is.null(p)) next
 
@@ -746,7 +794,8 @@ for (i in seq_len(nrow(overlay_specs))) {
         scenario_name = scenario_name,
         overlay_spec = overlay_spec,
         map_data = trade_map_data,
-        map_spec = map_spec
+        map_spec = map_spec,
+        prepared_flow = prepared_flow
       )
       if (is.null(p_overlay)) next
 
