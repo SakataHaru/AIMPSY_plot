@@ -4,9 +4,9 @@
 # PSM run: <PSM output root>/<SCENARIO>/<REGION>/<DATE>/main
 PSM_SCENARIO <- "global_softlink_Sc"
 PSM_REGION <- "Global"
-PSM_DATE <- "2608031904"
+PSM_DATE <- "2608031707"
 
-timeresol <- "12DAY"
+timeresol <- "6HOUR"
 
 # AIM-Technology run: <AIMT output root>/<SCENARIO>/<DATE>/main
 AIMT_SCENARIO <- "softlink_Sc"

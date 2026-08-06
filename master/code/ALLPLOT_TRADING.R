@@ -2,9 +2,9 @@
 
 PSM_SCENARIO <- "global_softlink_Sc"
 PSM_REGION <- "Global"
-PSM_DATE <- "2608031904"
+PSM_DATE <- "2608031707"
 
-timeresol <- "12DAY"
+timeresol <- "6HOUR"
 target_scenarios <- c("NPi500")
 plot_year <- 2050
 
@@ -899,4 +899,235 @@ for (i in seq_len(nrow(trade_specs))) {
       )
     }
   }
+}
+
+# GENERATE AND SAVE COMBINED H2, NH3, AND SYNFUEL NETWORK --------------------
+
+network_carrier_levels <- c("Hydrogen", "Synfuel", "Ammonia")
+network_carrier_colors <- c(
+  "Hydrogen" = h2_color_high,
+  "Synfuel" = "#00796b",
+  "Ammonia" = "#c51b7d"
+)
+
+read_network_trade_edges <- function(scenario_name, carrier_code) {
+  trade_spec <- trade_specs %>% filter(Carrier == carrier_code)
+  if (nrow(trade_spec) != 1) {
+    stop("Expected one trade specification for carrier: ", carrier_code)
+  }
+
+  map_dfr(seq_len(nrow(trade_flow_specs)), function(i) {
+    read_trade_value(scenario_name, trade_spec, trade_flow_specs[i, ])
+  }) %>%
+    make_trade_edges_sf()
+}
+
+prepare_network_trade_layer <- function(edges_sf, carrier_name) {
+  carrier_factor <- function(x) factor(x, levels = network_carrier_levels)
+
+  if (nrow(edges_sf) == 0) {
+    return(list(
+      route_lines = tibble(
+        x = numeric(), y = numeric(), segment_id = character(),
+        Value_plot = numeric(), Carrier = carrier_factor(character())
+      ),
+      route_arrows = tibble(
+        x = numeric(), y = numeric(), xend = numeric(), yend = numeric(),
+        Value_plot = numeric(), Carrier = carrier_factor(character())
+      ),
+      route_nodes = tibble(N_PSY = character(), lon = numeric(), lat = numeric())
+    ))
+  }
+
+  prepared <- prepare_trade_flow(edges_sf)
+  list(
+    route_lines = prepared$route_lines %>%
+      mutate(Carrier = carrier_factor(carrier_name)),
+    route_arrows = prepared$route_arrows %>%
+      mutate(Carrier = carrier_factor(carrier_name)),
+    route_nodes = prepared$route_nodes
+  )
+}
+
+add_network_trade_layer <- function(trade_layer) {
+  list(
+    geom_path(
+      data = trade_layer$route_lines,
+      aes(x = x, y = y, group = segment_id),
+      color = "white",
+      linewidth = 0.55,
+      alpha = 0.75,
+      lineend = "round",
+      show.legend = FALSE
+    ),
+    geom_path(
+      data = trade_layer$route_lines,
+      aes(
+        x = x, y = y, group = segment_id,
+        linewidth = Value_plot, color = Carrier
+      ),
+      alpha = 0.9,
+      lineend = "round"
+    ),
+    geom_segment(
+      data = trade_layer$route_arrows,
+      aes(x = x, y = y, xend = xend, yend = yend),
+      color = "white",
+      linewidth = 1.0,
+      alpha = 0.75,
+      lineend = "round",
+      arrow = arrow(length = grid::unit(2.4, "mm"), type = "closed"),
+      show.legend = FALSE
+    ),
+    geom_segment(
+      data = trade_layer$route_arrows,
+      aes(
+        x = x, y = y, xend = xend, yend = yend,
+        linewidth = Value_plot, color = Carrier
+      ),
+      alpha = 0.9,
+      lineend = "round",
+      arrow = arrow(length = grid::unit(2.15, "mm"), type = "closed"),
+      show.legend = FALSE
+    )
+  )
+}
+
+plot_combined_carrier_network <- function(
+  h2_edges,
+  synfuel_edges,
+  ammonia_edges,
+  scenario_name
+) {
+  network_values <- c(h2_edges$Value, synfuel_edges$Value, ammonia_edges$Value)
+  network_values <- network_values[is.finite(network_values) & network_values > 0]
+  if (length(network_values) == 0) {
+    warning("No H2, NH3, or synfuel flows available for scenario: ", scenario_name)
+    return(NULL)
+  }
+
+  network_breaks <- make_flow_breaks(max(network_values))
+  flow_labels <- scales::label_number(accuracy = 0.00001)(network_breaks)
+  h2_plot_data <- h2_edges %>%
+    mutate(
+      Value_plot = log10(1 + Value),
+      Carrier = factor("Hydrogen", levels = network_carrier_levels)
+    ) %>%
+    st_drop_geometry() %>%
+    arrange(Value)
+  synfuel_layer <- prepare_network_trade_layer(synfuel_edges, "Synfuel")
+  ammonia_layer <- prepare_network_trade_layer(ammonia_edges, "Ammonia")
+  trade_nodes <- bind_rows(
+    synfuel_layer$route_nodes,
+    ammonia_layer$route_nodes
+  ) %>%
+    distinct(N_PSY, lon, lat)
+
+  ggplot() +
+    geom_sf(
+      data = trading_region_boundaries,
+      fill = "grey96",
+      color = "grey45",
+      linewidth = 0.25
+    ) +
+    geom_segment(
+      data = h2_plot_data,
+      aes(
+        x = x0, y = y0, xend = x1, yend = y1,
+        linewidth = Value_plot, color = Carrier
+      ),
+      alpha = 0.92,
+      lineend = "round"
+    ) +
+    add_network_trade_layer(synfuel_layer) +
+    add_network_trade_layer(ammonia_layer) +
+    geom_point(
+      data = trade_nodes,
+      aes(x = lon, y = lat),
+      shape = 21,
+      size = 2.5,
+      stroke = 0.5,
+      color = "grey20",
+      fill = "white",
+      alpha = 0.95,
+      inherit.aes = FALSE,
+      show.legend = FALSE
+    ) +
+    scale_linewidth_continuous(
+      range = c(0.20, 4.0),
+      breaks = log10(1 + network_breaks),
+      labels = flow_labels,
+      name = "vff_l / vfb_l annual flow (EJ/yr)"
+    ) +
+    scale_color_manual(
+      values = network_carrier_colors,
+      breaks = network_carrier_levels,
+      drop = FALSE,
+      name = "Energy carrier"
+    ) +
+    coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.box = "vertical",
+      legend.background = element_blank(),
+      legend.key.width = grid::unit(12, "mm"),
+      legend.key.height = grid::unit(3, "mm"),
+      legend.title = element_text(size = 7),
+      legend.text = element_text(size = 6.5),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) +
+    guides(
+      color = guide_legend(
+        order = 1,
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5,
+        override.aes = list(linewidth = 2.5, alpha = 1)
+      ),
+      linewidth = guide_legend(
+        order = 2,
+        direction = "horizontal",
+        title.position = "top",
+        title.hjust = 0.5
+      )
+    ) +
+    labs(
+      title = paste0(
+        scenario_name,
+        " hydrogen, synfuel, and ammonia combined network flows (",
+        plot_year,
+        ")"
+      )
+    )
+}
+
+h2_network_spec <- link_specs %>% filter(LinkType == "H2")
+for (scenario_name in target_scenarios) {
+  h2_network_edges <- get_link_edges(
+    scenario_name,
+    h2_network_spec,
+    link_flow_specs
+  )
+  synfuel_network_edges <- read_network_trade_edges(scenario_name, "SYF")
+  ammonia_network_edges <- read_network_trade_edges(scenario_name, "NH3")
+
+  save_trading_plot(
+    plot_combined_carrier_network(
+      h2_edges = h2_network_edges,
+      synfuel_edges = synfuel_network_edges,
+      ammonia_edges = ammonia_network_edges,
+      scenario_name = scenario_name
+    ),
+    file.path(trading_base_dir, scenario_name, "plot_network"),
+    paste0(
+      tolower(PSM_REGION),
+      "_",
+      scenario_name,
+      "_vff_l_vfb_l_combined_H2_SYF_NH3_network_",
+      plot_year,
+      ".png"
+    )
+  )
 }
