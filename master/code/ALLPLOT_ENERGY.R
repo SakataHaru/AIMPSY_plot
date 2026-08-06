@@ -1,4 +1,32 @@
-# Integrated regional summary plots ------------------------------------------
+# PLOT SETTINGS ---------------------------------------------------------------
+# Edit only the values in this section when changing runs or plot contents.
+
+# PSM run: <PSM output root>/<SCENARIO>/<REGION>/<DATE>/main
+PSM_SCENARIO <- "global_softlink_Sc"
+PSM_REGION <- "Global"
+PSM_DATE <- "2608031904"
+
+timeresol <- "12DAY"
+
+# AIM-Technology run: <AIMT output root>/<SCENARIO>/<DATE>/main
+AIMT_SCENARIO <- "softlink_Sc"
+AIMT_DATE <- "2606111707"
+
+# Use "on" to include a panel in the regional summary, or "off" to omit it.
+target_scenarios <- c("NPi500")
+plot_year <- 2050
+
+plot_targets <- c(
+  final_energy = "on",
+  co2_emissions = "on",
+  power_generation = "on",
+  transmission_flow = "on",
+  h2_nh3_synfuel_balance = "on",
+  biomass = "off",
+  ccs_storage = "off"
+)
+
+# PACKAGE AND PROJECT INITIALIZATION ------------------------------------------
 
 library(dplyr)
 library(tidyr)
@@ -46,8 +74,26 @@ source(file.path(project_dir, "code", "dataframe.R"))
 #   }
 # }
 
-psm_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink_Sc/Global/2608031904/main"
-aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
+# DERIVED SETTINGS AND INPUT PATHS --------------------------------------------
+
+required_run_settings <- c(
+  PSM_SCENARIO = PSM_SCENARIO,
+  PSM_REGION = PSM_REGION,
+  PSM_DATE = PSM_DATE,
+  AIMT_SCENARIO = AIMT_SCENARIO,
+  AIMT_DATE = AIMT_DATE
+)
+if (any(!nzchar(trimws(required_run_settings)))) {
+  stop(
+    "Run settings must not be blank: ",
+    paste(names(required_run_settings)[!nzchar(trimws(required_run_settings))], collapse = ", ")
+  )
+}
+
+psm_output_root <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+aimt_output_root <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output"
+psm_main_dir <- file.path(psm_output_root, PSM_SCENARIO, PSM_REGION, PSM_DATE, "main")
+aimt_main_dir <- file.path(aimt_output_root, AIMT_SCENARIO, AIMT_DATE, "main")
 psm_primary_dir <- file.path(dirname(psm_main_dir), "gams_output", "gdx_primary")
 r272_map_path <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/AIMPSY-master/data/set/M_R272.csv"
 
@@ -71,15 +117,64 @@ primary_time_weight_from_timeresol <- function(timeresol) {
   unname(weights[[timeresol]])
 }
 
-timeresol <- "12DAY"
 primary_time_weight <- primary_time_weight_from_timeresol(timeresol)
 
-target_scenarios <- c("NPi500")
-plot_year <- 2050
+target_scenarios <- unique(trimws(as.character(target_scenarios)))
+if (length(target_scenarios) == 0 || any(!nzchar(target_scenarios))) {
+  stop("target_scenarios must contain at least one non-blank scenario name.")
+}
+if (length(plot_year) != 1 || !is.numeric(plot_year) || is.na(plot_year)) {
+  stop("plot_year must be one numeric year.")
+}
+
+required_plot_targets <- c(
+  "final_energy",
+  "co2_emissions",
+  "power_generation",
+  "transmission_flow",
+  "h2_nh3_synfuel_balance",
+  "biomass",
+  "ccs_storage"
+)
+if (is.null(names(plot_targets)) || any(names(plot_targets) == "") || anyDuplicated(names(plot_targets))) {
+  stop("plot_targets must be a named vector with one unique name per plot target.")
+}
+missing_plot_targets <- setdiff(required_plot_targets, names(plot_targets))
+unknown_plot_targets <- setdiff(names(plot_targets), required_plot_targets)
+if (length(missing_plot_targets) > 0 || length(unknown_plot_targets) > 0) {
+  stop(
+    "Invalid plot_targets names. Missing: ",
+    paste(missing_plot_targets, collapse = ", "),
+    "; unknown: ",
+    paste(unknown_plot_targets, collapse = ", ")
+  )
+}
+plot_targets <- setNames(
+  tolower(trimws(as.character(plot_targets[required_plot_targets]))),
+  required_plot_targets
+)
+invalid_plot_switches <- names(plot_targets)[!plot_targets %in% c("on", "off")]
+if (length(invalid_plot_switches) > 0) {
+  stop(
+    "plot_targets values must be \"on\" or \"off\": ",
+    paste(invalid_plot_switches, collapse = ", ")
+  )
+}
+plot_enabled <- setNames(plot_targets == "on", names(plot_targets))
+is_plot_enabled <- function(plot_name) {
+  isTRUE(unname(plot_enabled[[plot_name]]))
+}
+
 time_years <- seq(2020, 2050, by = 5)
 gwh_to_ej <- 3.6e-6
 twh_to_ej <- 3.6 / 1000
-base_dir <- file.path(project_dir, "output", paste0("global_2608031904_", timeresol))
+base_dir <- file.path(
+  project_dir,
+  "output",
+  paste0(tolower(PSM_REGION), "_", PSM_DATE, "_", toupper(trimws(timeresol)))
+)
+
+# REGION DEFINITIONS AND IAMC DATA PREPARATION --------------------------------
 
 region_list <- c(
   "World",
@@ -151,6 +246,8 @@ all_data <- bind_rows(aimt_plot_data, psm_plot_data) %>%
     Model = factor(Model, levels = c("AIM-Technology", "PSM"))
   )
 
+# NODE-TO-REGION MAPPING -------------------------------------------------------
+
 normalize_link_node <- function(node_name) {
   node_name %>%
     str_remove_all(fixed("-AC")) %>%
@@ -201,6 +298,8 @@ node_to_region <- function(node_name) {
   mapped <- r272_region_map$R31[match(node_name, r272_region_map$N_IND)]
   if_else(is.na(mapped) | mapped == "", fallback, mapped)
 }
+
+# ELECTRICITY TRANSMISSION FLOW DATA ------------------------------------------
 
 read_link_flow_symbol <- function(scenario_name, symbol, base_direction) {
   gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -303,6 +402,8 @@ link_counterpart_colors <- setNames(
   grDevices::hcl.colors(length(link_counterparts), palette = "Dark 3"),
   link_counterparts
 )
+
+# H2, NH3, AND SYNFUEL BALANCE DEFINITIONS ------------------------------------
 
 fuel_specs <- tribble(
   ~Fuel, ~SupplyVariables, ~DemandVariables, ~LinkPattern, ~NodeSuffixPattern,
@@ -444,6 +545,8 @@ for (scenario_name in target_scenarios) {
     )
   }
 }
+
+# CARRIER TRANSPORT AND CONVERSION FLOW DATA ----------------------------------
 
 read_carrier_flow_symbol <- function(scenario_name, symbol, base_direction, fuel_spec) {
   gdx_path <- file.path(psm_primary_dir, scenario_name, paste0(plot_year, ".gdx"))
@@ -694,6 +797,8 @@ carrier_balance_data <- bind_rows(lapply(target_scenarios, function(scenario_nam
     Region = factor(Region, levels = region_list)
   )
 
+# BIOMASS BALANCE DATA ---------------------------------------------------------
+
 biomass_supply_variables <- list(
   c("Prm_Ene_Bio_Ele", "Prm_Ene_Bio_Hyd")
 )
@@ -891,6 +996,8 @@ make_biomass_bar_data <- function(balance_row, imports) {
     )
 }
 
+# CCS STORAGE POTENTIAL AND USE DATA ------------------------------------------
+
 ccs_storage_kind_levels <- c("Storage use")
 ccs_storage_kind_colors <- c("Storage use" = "#238b45")
 
@@ -998,6 +1105,8 @@ ccs_summary_data <- expand_grid(
     Region = factor(Region, levels = region_list)
   )
 
+# PLOT VARIABLE, LABEL, AND COLOR DEFINITIONS ---------------------------------
+
 finene_read_spec <- tribble(
   ~Variable,                ~PlotVariable,           ~Legend,          ~Color,
   "Fin_Ene_SolidsCoa",      "Fin_Ene_SolidsCoa",     "Coal",           "grey70",
@@ -1049,6 +1158,8 @@ emisec_spec <- emisec %>%
   mutate(Variable = as.character(Variable))
 emisec_colors <- setNames(as.character(emisec_spec$Color), emisec_spec$Variable)
 emisec_labels <- setNames(as.character(emisec_spec$Legend), emisec_spec$Variable)
+
+# REGIONAL PANEL THEMES AND PLOT FUNCTIONS ------------------------------------
 
 plot_theme <- theme_bw(base_size = 8.5) +
   theme(
@@ -1613,35 +1724,106 @@ plot_ccs_storage_region <- function(summary_df, use_df, scenario_name, region_na
     )
 }
 
-make_region_row <- function(df, scenario_name, region_name) {
-  (
-    blank_region_label(region_name) |
-    plot_final_energy_region(df, scenario_name, region_name) |
-      finene_legend |
-      plot_emissions_region(df, scenario_name, region_name) |
-      emisec_legend_plot |
-      plot_power_mix_region(df, scenario_name, region_name) |
-      secele_legend_plot |
-      plot_link_flow_region(link_flow_data, scenario_name, region_name) |
-      plot_carrier_balance_region(carrier_balance_data, conversion_plot_data, scenario_name, region_name) |
-      plot_biomass_balance_region(biomass_balance_data, biomass_import_source_data, scenario_name, region_name) |
-      plot_ccs_storage_region(ccs_summary_data, ccs_use_data, scenario_name, region_name)
-  ) +
-    plot_layout(widths = c(0.28, 0.55, 0.42, 0.39, 0.50, 0.88, 0.62, 0.82, 0.92, 0.72, 0.72))
+# SUMMARY PANEL LAYOUT ---------------------------------------------------------
+
+summary_panel_widths <- list(
+  region_label = 0.28,
+  final_energy = c(0.55, 0.42),
+  co2_emissions = c(0.39, 0.50),
+  power_generation = c(0.88, 0.62),
+  transmission_flow = 0.82,
+  h2_nh3_synfuel_balance = 0.92,
+  biomass = 0.72,
+  ccs_storage = 0.72
+)
+
+active_summary_widths <- function() {
+  widths <- summary_panel_widths$region_label
+  for (plot_name in required_plot_targets) {
+    if (is_plot_enabled(plot_name)) {
+      widths <- c(widths, summary_panel_widths[[plot_name]])
+    }
+  }
+  widths
 }
 
-save_plot_page <- function(plot, filename) {
+make_region_row <- function(df, scenario_name, region_name) {
+  row_plots <- list(blank_region_label(region_name))
+
+  if (is_plot_enabled("final_energy")) {
+    row_plots <- c(
+      row_plots,
+      list(plot_final_energy_region(df, scenario_name, region_name), finene_legend)
+    )
+  }
+  if (is_plot_enabled("co2_emissions")) {
+    row_plots <- c(
+      row_plots,
+      list(plot_emissions_region(df, scenario_name, region_name), emisec_legend_plot)
+    )
+  }
+  if (is_plot_enabled("power_generation")) {
+    row_plots <- c(
+      row_plots,
+      list(plot_power_mix_region(df, scenario_name, region_name), secele_legend_plot)
+    )
+  }
+  if (is_plot_enabled("transmission_flow")) {
+    row_plots <- c(
+      row_plots,
+      list(plot_link_flow_region(link_flow_data, scenario_name, region_name))
+    )
+  }
+  if (is_plot_enabled("h2_nh3_synfuel_balance")) {
+    row_plots <- c(
+      row_plots,
+      list(
+        plot_carrier_balance_region(
+          carrier_balance_data,
+          conversion_plot_data,
+          scenario_name,
+          region_name
+        )
+      )
+    )
+  }
+  if (is_plot_enabled("biomass")) {
+    row_plots <- c(
+      row_plots,
+      list(
+        plot_biomass_balance_region(
+          biomass_balance_data,
+          biomass_import_source_data,
+          scenario_name,
+          region_name
+        )
+      )
+    )
+  }
+  if (is_plot_enabled("ccs_storage")) {
+    row_plots <- c(
+      row_plots,
+      list(plot_ccs_storage_region(ccs_summary_data, ccs_use_data, scenario_name, region_name))
+    )
+  }
+
+  wrap_plots(row_plots, nrow = 1, widths = active_summary_widths())
+}
+
+save_plot_page <- function(plot, filename, width_mm) {
   dir.create(dirname(filename), recursive = TRUE, showWarnings = FALSE)
   ggsave(
     filename = filename,
     plot = plot,
-    width = 820,
+    width = width_mm,
     height = 300,
     units = "mm",
     dpi = 300,
     bg = "white"
   )
 }
+
+# MANUAL LEGEND CONSTRUCTION --------------------------------------------------
 
 make_manual_legend <- function(spec, colors, labels, ncol = 1, text_size = 2.0, reverse_order = TRUE) {
   legend_data <- if (reverse_order) {
@@ -1682,6 +1864,14 @@ secele_legend_plot <- make_manual_legend(
   reverse_order = FALSE
 )
 
+full_summary_width <- sum(unlist(summary_panel_widths, use.names = FALSE))
+summary_output_width_mm <- max(
+  80,
+  820 * sum(active_summary_widths()) / full_summary_width
+)
+
+# GENERATE AND SAVE REGIONAL SUMMARY PLOTS ------------------------------------
+
 for (scenario_name in target_scenarios) {
   out_dir <- file.path(base_dir, scenario_name, "plot_all")
 
@@ -1701,8 +1891,16 @@ for (scenario_name in target_scenarios) {
       plot = page_plot,
       filename = file.path(
         out_dir,
-        paste0("global_", scenario_name, "_regional_summary_page_", page_idx, ".png")
-      )
+        paste0(
+          tolower(PSM_REGION),
+          "_",
+          scenario_name,
+          "_regional_summary_page_",
+          page_idx,
+          ".png"
+        )
+      ),
+      width_mm = summary_output_width_mm
     )
   }
 }

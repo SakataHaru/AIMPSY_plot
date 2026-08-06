@@ -166,19 +166,19 @@ overlay_specs <- tibble(
 trade_map_specs <- tibble(
   Carrier = c("NH3", "BMS", "SYF"),
   DemandVariables = list(
-    "Sec_Ene_Hyd_Amm",
+    "Fin_Ene_Hyd_Amm",
     c("Sec_Ene_Ele_Bio_wo_CCS", "Sec_Ene_Ele_Bio_w_CCS"),
-    "Sec_Ene_Hyd_Syn"
+    "Fin_Ene_Hyd_Syn"
   ),
   MapLabel = c(
     "Ammonia demand",
     "Biomass power generation",
-    "Synfuel production"
+    "Synfuel demand"
   ),
   LegendTitle = c(
-    "Sec_Ene_Hyd_Amm (EJ/yr)",
+    "Ammonia demand (EJ/yr)",
     "Biomass power generation (EJ/yr)",
-    "Sec_Ene_Hyd_Syn (EJ/yr)"
+    "Synfuel demand (EJ/yr)"
   ),
   FillLow = c("#fbf7ff", "#f7fcf5", "#e0f2f1"),
   FillHigh = c("#54278f", "#006d2c", "#00796b")
