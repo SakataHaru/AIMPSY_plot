@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# Local and potentially large inputs for IntermReport figures
+/IntermReport/data/
