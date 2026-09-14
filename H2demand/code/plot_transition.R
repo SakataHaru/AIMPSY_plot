@@ -1,4 +1,13 @@
-# Power generation transition plots -------------------------------------------
+# PLOT SETTINGS ---------------------------------------------------------------
+
+PSM_SCENARIO <- "global_softlink_Sc"
+PSM_REGION <- "Global"
+PSM_DATE <- "2609041400"
+
+target_scenarios <- c("NPi500","NPi500_H2")
+target_years <- seq(2005, 2050, by = 5)
+
+# PACKAGES AND SCRIPT LOCATION ------------------------------------------------
 
 library(dplyr)
 library(tidyr)
@@ -23,14 +32,31 @@ project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
   normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = FALSE)
 }
 
+# DERIVED SETTINGS AND INPUT PATHS --------------------------------------------
+
+if (length(target_scenarios) != 2L || anyNA(target_scenarios) || any(!nzchar(target_scenarios))) {
+  stop("target_scenarios must contain exactly two non-blank scenario names.")
+}
+
+comparison_name <- paste(target_scenarios, collapse = "_vs_")
+comparison_groups <- comparison_name
+
 source(file.path(project_dir, "code", "dataframe.R"))
 
-psm_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/global_softlink_Sc/Global/2608031707/main"
-aimt_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
+psm_output_root <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+psm_main_dir <- file.path(
+  psm_output_root,
+  PSM_SCENARIO,
+  PSM_REGION,
+  PSM_DATE,
+  "main"
+)
 
-target_scenarios <- c("NPi500")
-time_years <- seq(2020, 2050, by = 5)
-base_dir <- file.path(project_dir, "output", "global_2608031707_6HOUR")
+base_dir <- file.path(
+  project_dir,
+  "output",
+  paste(PSM_SCENARIO, PSM_DATE, comparison_name, sep = "_")
+)
 
 region_list <- c(
   "World",
@@ -44,9 +70,9 @@ region_base <- setdiff(region_list, "World")
 regions_per_page <- 4
 region_pages <- split(region_list, ceiling(seq_along(region_list) / regions_per_page))
 
-model_levels <- c("AIM-Technology", "PSM")
-model_labels <- c("AIM-Technology" = "AIM-Technology", "PSM" = "PSM")
-model_colors <- c("AIM-Technology" = "black", "PSM" = "#e31a1c")
+model_levels <- target_scenarios
+model_labels <- setNames(target_scenarios, target_scenarios)
+model_colors <- setNames(c("black", "#e31a1c"), target_scenarios)
 
 drop_r31_region_rows <- function(df) {
   df %>%
@@ -54,21 +80,24 @@ drop_r31_region_rows <- function(df) {
     filter(!str_detect(RawRegion, "^R31-"))
 }
 
-read_iamc_gdx <- function(main_dir, model_name) {
+# IAMC DATA PREPARATION -------------------------------------------------------
+
+read_iamc_gdx <- function(main_dir, source_scenario) {
   gdx_path <- file.path(main_dir, "merged_output.gdx")
   if (!file.exists(gdx_path)) {
     stop("Missing GDX file: ", gdx_path)
   }
 
   rgdx.param(gdx_path, "iamc_gdx") %>%
+    filter(as.character(Sc) == source_scenario) %>%
     drop_r31_region_rows() %>%
     transmute(
-      Scenario = as.character(Sc),
+      Scenario = comparison_name,
       Region = RawRegion,
       Variable = as.character(Sv),
       Year = as.numeric(as.character(Y5)),
       Value = suppressWarnings(as.numeric(as.character(iamc_gdx))),
-      Model = model_name
+      Model = source_scenario
     ) %>%
     filter(!is.na(Value)) %>%
     group_by(Scenario, Region, Variable, Year, Model) %>%
@@ -89,22 +118,25 @@ add_world_rows <- function(df, regions, replace_existing = TRUE) {
   bind_rows(df, world)
 }
 
-aimt_data <- read_iamc_gdx(aimt_main_dir, "AIM-Technology")
-psm_data <- read_iamc_gdx(psm_main_dir, "PSM")
+scenario_data <- bind_rows(lapply(target_scenarios, function(source_scenario) {
+  read_iamc_gdx(psm_main_dir, source_scenario)
+}))
 
-all_data <- bind_rows(aimt_data, psm_data) %>%
+all_data <- scenario_data %>%
   filter(
-    Scenario %in% target_scenarios,
-    Year %in% time_years,
+    Scenario %in% comparison_groups,
+    Year %in% target_years,
     Region %in% region_base
   ) %>%
   add_world_rows(region_base, replace_existing = TRUE) %>%
   filter(Region %in% region_list) %>%
   mutate(
-    Scenario = factor(Scenario, levels = target_scenarios),
+    Scenario = factor(Scenario, levels = comparison_groups),
     Region = factor(Region, levels = region_list),
     Model = factor(Model, levels = model_levels)
   )
+
+# TRANSITION DATA PREPARATION -------------------------------------------------
 
 power_spec <- secele %>%
   mutate(Variable = as.character(Variable))
@@ -140,6 +172,8 @@ capacity_transition_data <- all_data %>%
     Region = factor(Region, levels = region_list),
     Model = factor(Model, levels = model_levels)
   )
+
+# REGIONAL PANEL THEMES AND PLOT FUNCTIONS ------------------------------------
 
 plot_theme <- theme_bw(base_size = 9) +
   theme(
@@ -195,7 +229,7 @@ complete_power_region_data <- function(df, scenario_name, region_name) {
     Scenario = scenario_name,
     Region = region_name,
     Model = model_levels,
-    Year = time_years,
+    Year = target_years,
     Variable = power_spec$Variable
   )
 
@@ -223,7 +257,7 @@ complete_capacity_region_data <- function(df, scenario_name, region_name) {
     Scenario = scenario_name,
     Region = region_name,
     Model = model_levels,
-    Year = time_years,
+    Year = target_years,
     Technology = capacity_spec$Technology
   )
 
@@ -252,7 +286,7 @@ plot_power_transition_region <- function(df, scenario_name, region_name) {
   ggplot(d, aes(x = Year, y = Value, fill = Variable)) +
     geom_area(linewidth = 0.05, color = "white") +
     scale_fill_manual(values = power_colors, labels = power_labels, drop = FALSE) +
-    scale_x_continuous(breaks = time_years) +
+    scale_x_continuous(breaks = target_years) +
     expand_limits(y = 0) +
     facet_wrap(~Model, nrow = 1, scales = "fixed", drop = FALSE) +
     labs(
@@ -281,7 +315,7 @@ plot_capacity_transition_region <- function(df, scenario_name, region_name, tech
     geom_line(linewidth = 0.42) +
     geom_point(size = 1.45, stroke = 0.35) +
     scale_color_manual(values = model_colors, drop = FALSE) +
-    scale_x_continuous(breaks = time_years) +
+    scale_x_continuous(breaks = target_years) +
     expand_limits(y = 0) +
     labs(
       y = "Capacity (GW)",
@@ -336,7 +370,9 @@ save_plot_page <- function(plot, filename) {
   )
 }
 
-for (scenario_name in target_scenarios) {
+# GENERATE AND SAVE PLOTS -----------------------------------------------------
+
+for (scenario_name in comparison_groups) {
   scenario_data <- power_transition_data %>%
     filter(Scenario == scenario_name)
 

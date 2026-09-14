@@ -1,7 +1,7 @@
 library(gdxrrw)
 
 x <- rgdx.param(
-  "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/biopotential_check/Global/2609022141/main/merged_output.gdx",
+  "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output/biopotential_check/Global/2609032142/main/merged_output.gdx",
   "iamc_gdx"
 )
 

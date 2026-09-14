@@ -243,7 +243,7 @@ emisec <- tribble(~Variable,~Legend,~Color,
                   'Emi_CO2_Ene_Dem_Res_and_Com','Buildings','lightskyblue3',
                   'Emi_CO2_Ene_Dem_Tra','Transport','darkolivegreen2',
                   'Emi_CO2_Ene_Dem_Oth_Sec','Other\ndemand','grey',
-                  'Emi_CO2_Ene_Dem_AFO','AFOFI','paleturquoise3',
+#                  'Emi_CO2_Ene_Dem_AFO','AFOFI','paleturquoise3',
                   'Emi_CO2_Ind_Pro','Industrial\nprocess','sandybrown',
                   'Emi_CO2_Oth','DACCS','thistle2')
 

@@ -2,7 +2,7 @@
 
 PSM_SCENARIO <- "biopotential_check"
 PSM_REGION <- "Global"
-PSM_DATE <- "2609022141"
+PSM_DATE <- "2609032142"
 
 target_scenarios <- c("300C-R31", "300C-R272")
 target_years <- seq(2005, 2050, by = 5)

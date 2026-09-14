@@ -2,10 +2,10 @@
 
 PSM_SCENARIO <- "global_softlink_Sc"
 PSM_REGION <- "Global"
-PSM_DATE <- "2608031707"
+PSM_DATE <- "2609041400"
 
+target_scenarios <- c("NPi500","NPi500_H2")
 timeresol <- "6HOUR"
-target_scenarios <- c("NPi500")
 plot_year <- 2050
 
 # PROJECT DISCOVERY AND PACKAGES ---------------------------------------------
@@ -78,6 +78,7 @@ target_scenarios <- unique(target_scenarios)
 primary_time_weight_from_timeresol <- function(timeresol) {
   timeresol <- toupper(trimws(timeresol))
   weights <- c(
+    "1DAY" = 365,
     "12DAY" = ceiling(365 / 12 * 1000) / 1000,
     "6HOUR" = 6,
     "4HOUR" = 4,
@@ -685,6 +686,23 @@ route_coordinates_df <- function(edge_sf, route_id) {
 }
 
 prepare_trade_flow <- function(edges_sf) {
+  if (nrow(edges_sf) == 0) {
+    return(list(
+      route_lines = tibble(
+        x = numeric(), y = numeric(), route_id = character(),
+        part = integer(), coord_order = integer(), dateline_part = integer(),
+        segment_id = character(), Value = numeric(), Value_plot = numeric()
+      ),
+      route_arrows = tibble(
+        x = numeric(), y = numeric(), xend = numeric(), yend = numeric(),
+        Value_plot = numeric()
+      ),
+      route_nodes = tibble(
+        N_PSY = character(), lon = numeric(), lat = numeric()
+      )
+    ))
+  }
+
   edges_plot <- edges_sf %>% mutate(Value_plot = log10(1 + Value))
   route_lines <- map_dfr(seq_len(nrow(edges_plot)), function(i) {
     edge <- edges_plot[i, ]

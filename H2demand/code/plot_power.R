@@ -1,4 +1,13 @@
-# import data and set up -----------------------------------------------
+# PLOT SETTINGS ---------------------------------------------------------------
+
+PSM_SCENARIO <- "global_softlink_Sc"
+PSM_REGION <- "Global"
+PSM_DATE <- "2609041400"
+
+target_scenarios <- c("NPi500","NPi500_H2")
+target_years <- seq(2005, 2050, by = 5)
+
+# PACKAGES AND SCRIPT LOCATION ------------------------------------------------
 
 library(dplyr)
 library(tidyr)
@@ -26,15 +35,24 @@ project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
 #  }
 #}
 
-case_name <- "Global softlink model comparison"
+# DERIVED SETTINGS AND INPUT PATHS --------------------------------------------
 
-aimpsy <- '//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output'
-scenario <- 'global_softlink_Sc'
-region <- 'Global'
-power_dates <- c("PSM" = "2607301357")
-power_main_dirs <- file.path(aimpsy, scenario, region, power_dates, "main")
-names(power_main_dirs) <- names(power_dates)
-energy_main_dir <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_Sc/2606111707/main"
+if (length(target_scenarios) != 2L || anyNA(target_scenarios) || any(!nzchar(target_scenarios))) {
+  stop("target_scenarios must contain exactly two non-blank scenario names.")
+}
+
+case_name <- paste(target_scenarios, collapse = " vs ")
+comparison_name <- paste(target_scenarios, collapse = "_vs_")
+comparison_groups <- comparison_name
+
+psm_output_root <- "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+psm_main_dir <- file.path(
+  psm_output_root,
+  PSM_SCENARIO,
+  PSM_REGION,
+  PSM_DATE,
+  "main"
+)
 
 region_list <- c(
   "JPN", "CHN", "IND", "IDN", "KOR", "THA", "MYS", "VNM",
@@ -44,11 +62,13 @@ region_list <- c(
   "XAF", "XNF"
 )
 
-target_scenarios <- c("NPi500", "NPi500-ZF2050", "NPi500-LimCCS_bio")
-target_years <- seq(2005, 2050, by = 5)
-base_dir <- file.path(project_dir, "output", "global_2607301357_12DAY")
+base_dir <- file.path(
+  project_dir,
+  "output",
+  paste(PSM_SCENARIO, PSM_DATE, comparison_name, sep = "_")
+)
 
-model_color <- c("AIM-Technology" = "black", "PSM" = "#e31a1c")
+model_color <- setNames(c("black", "#e31a1c"), target_scenarios)
 point_shape <- 16
 
 MyTheme <- theme_bw() +
@@ -80,7 +100,9 @@ MyTheme <- theme_bw() +
     plot.tag = element_text(face = "bold")
   )
 
-read_iamc_gdx <- function(main_dir, model_name) {
+# IAMC DATA PREPARATION -------------------------------------------------------
+
+read_iamc_gdx <- function(main_dir, source_scenario) {
   gdx_path <- file.path(main_dir, "merged_output.gdx")
 
   if (!file.exists(gdx_path)) {
@@ -88,29 +110,31 @@ read_iamc_gdx <- function(main_dir, model_name) {
   }
 
   rgdx.param(gdx_path, "iamc_gdx") %>%
+    filter(as.character(Sc) == source_scenario) %>%
     transmute(
-      Scenario = as.character(Sc),
+      Scenario = comparison_name,
       Region   = as.character(Sr),
       Variable = as.character(Sv),
       Year     = as.numeric(as.character(Y5)),
       Value    = suppressWarnings(as.numeric(as.character(iamc_gdx))),
-      Model    = model_name,
+      Model    = source_scenario,
       Case     = case_name
     ) %>%
     filter(!is.na(Value))
 }
 
 df_base_region <- bind_rows(
-  read_iamc_gdx(energy_main_dir, "AIM-Technology"),
-  read_iamc_gdx(power_main_dirs[["PSM"]], "PSM")
+  lapply(target_scenarios, function(source_scenario) {
+    read_iamc_gdx(psm_main_dir, source_scenario)
+  })
 ) %>%
   filter(
     Region %in% region_list,
-    Scenario %in% target_scenarios,
+    Scenario %in% comparison_groups,
     Year %in% target_years
   ) %>%
   mutate(
-    Scenario = factor(Scenario, levels = target_scenarios),
+    Scenario = factor(Scenario, levels = comparison_groups),
     Region = factor(Region, levels = region_list),
     Model = factor(Model, levels = names(model_color)),
     Case = case_name
@@ -144,7 +168,7 @@ df_world <- df_base_region %>%
 
 df_base <- bind_rows(df_base_region, df_world) %>%
   mutate(
-    Scenario = factor(Scenario, levels = target_scenarios),
+    Scenario = factor(Scenario, levels = comparison_groups),
     Region = factor(Region, levels = region_list_plot),
     Model = factor(Model, levels = names(model_color))
   )
@@ -174,18 +198,18 @@ save_png <- function(plot, filename, width = save_width_mm, height = save_height
 
 # Select and run only the plot section needed below.
 
-# plot_capacity ---------------------------------------------------------------
+# CAPACITY PLOTS --------------------------------------------------------------
 # Run this section only when capacity plots are needed.
 capacity_specs <- tribble(
   ~var,              ~ylab,           ~title,                    ~fname,
-  "Cap_Ele_Solar",   "Capacity (GW)", "Solar power capacity",    "Cap_global_softlink_Solar_31reg_world.png",
-  "Cap_Ele_Win",     "Capacity (GW)", "Wind power capacity",     "Cap_global_softlink_Wind_31reg_world.png",
-  "Cap_Ele_Hyp",     "Capacity (GW)", "Hydro power capacity",    "Cap_global_softlink_Hydro_31reg_world.png",
-  "Cap_Ele_Sto_Bat", "Capacity (GW)", "Battery capacity",        "Cap_global_softlink_Battery_31reg_world.png",
-  "Cap_Hyd_Ele",     "Capacity (GW)", "Electrolyzer capacity",   "Cap_global_softlink_Electrolyzer_31reg_world.png"
+  "Cap_Ele_Solar",   "Capacity (GW)", "Solar power capacity",    "Cap_biopotential_check_Solar_31reg_world.png",
+  "Cap_Ele_Win",     "Capacity (GW)", "Wind power capacity",     "Cap_biopotential_check_Wind_31reg_world.png",
+  "Cap_Ele_Hyp",     "Capacity (GW)", "Hydro power capacity",    "Cap_biopotential_check_Hydro_31reg_world.png",
+  "Cap_Ele_Sto_Bat", "Capacity (GW)", "Battery capacity",        "Cap_biopotential_check_Battery_31reg_world.png",
+  "Cap_Hyd_Ele",     "Capacity (GW)", "Electrolyzer capacity",   "Cap_biopotential_check_Electrolyzer_31reg_world.png"
 )
 
-for (scenario_name in target_scenarios) {
+for (scenario_name in comparison_groups) {
   out_dir <- file.path(base_dir, scenario_name, "plot_capacity")
 
   for (i in seq_len(nrow(capacity_specs))) {
@@ -218,14 +242,14 @@ for (scenario_name in target_scenarios) {
   }
 }
 
-# plot_eleuse -----------------------------------------------------------------
+# ELECTRICITY-USE PLOTS -------------------------------------------------------
 # Run this section only when electricity-use plots are needed.
 eleuse_specs <- tribble(
   ~var,                ~ylab,                 ~title,                    ~fname,
-  "Sec_Ene_Ele_Cur",   "Curtailment (EJ/yr)", "Electricity curtailment",  "Eleuse_global_softlink_Curtailment_31reg_world.png"
+  "Sec_Ene_Ele_Cur",   "Curtailment (EJ/yr)", "Electricity curtailment",  "Eleuse_biopotential_check_Curtailment_31reg_world.png"
 )
 
-for (scenario_name in target_scenarios) {
+for (scenario_name in comparison_groups) {
   out_dir <- file.path(base_dir, scenario_name, "plot_eleuse")
 
   for (i in seq_len(nrow(eleuse_specs))) {
@@ -258,7 +282,7 @@ for (scenario_name in target_scenarios) {
   }
 }
 
-# plot_CF ---------------------------------------------------------------------
+# CAPACITY-FACTOR PLOTS -------------------------------------------------------
 # Run this section only when capacity factor plots are needed.
 cf_specs <- tribble(
   ~tech,   ~gen_var,             ~cap_var,         ~file_tag,
@@ -269,7 +293,7 @@ ej_to_mwh <- 277777777.7777778
 gw_to_mw <- 1000
 hours_per_year <- 8760
 
-for (scenario_name in target_scenarios) {
+for (scenario_name in comparison_groups) {
   out_dir <- file.path(base_dir, scenario_name, "plot_CF")
 
   for (i in seq_len(nrow(cf_specs))) {
@@ -307,21 +331,21 @@ for (scenario_name in target_scenarios) {
 
     save_png(
       plot = p,
-      filename = file.path(out_dir, paste0(scenario_name, "_CF_", cf_specs$file_tag[i], "_global_softlink_31reg_world.png"))
+      filename = file.path(out_dir, paste0(scenario_name, "_CF_", cf_specs$file_tag[i], "_biopotential_check_31reg_world.png"))
     )
   }
 }
 
-# plot_transmission -----------------------------------------------------------
+# TRANSMISSION-LOSS PLOTS -----------------------------------------------------
 # Run this section only when transmission loss plots are needed.
 transmission_fill <- c(
   "Distribution loss" = "#9ecae1",
   "Transmission loss" = "#fdae6b"
 )
 
-for (scenario_name in target_scenarios) {
+for (scenario_name in comparison_groups) {
   out_dir <- file.path(base_dir, scenario_name, "plot_transmission")
-  old_loss_share_file <- file.path(out_dir, paste0(scenario_name, "_TransmissionLossShare_global_softlink_31reg_world.png"))
+  old_loss_share_file <- file.path(out_dir, paste0(scenario_name, "_TransmissionLossShare_biopotential_check_31reg_world.png"))
   if (file.exists(old_loss_share_file)) file.remove(old_loss_share_file)
 
   d_total <- df_plot %>%
@@ -331,7 +355,7 @@ for (scenario_name in target_scenarios) {
     filter(
       Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
       Scenario == scenario_name,
-      Model == "PSM"
+      Model == target_scenarios[[2]]
     ) %>%
     mutate(
       LossType = recode(
@@ -387,13 +411,13 @@ for (scenario_name in target_scenarios) {
 
   save_png(
     plot = p,
-    filename = file.path(out_dir, paste0(scenario_name, "_TransmissionLoss_global_softlink_31reg_world.png"))
+    filename = file.path(out_dir, paste0(scenario_name, "_TransmissionLoss_biopotential_check_31reg_world.png"))
   )
 
   loss_share_specs <- tribble(
     ~denominator_var, ~denominator_label,             ~denominator_model,      ~file_tag,                  ~rate_label,
     "Sec_Ene_Ele",    "model-specific Sec_Ene_Ele",   NA_character_,           "SecEneEle",                "loss/sup",
-    "Fin_Ene_Ele",    "AIM-Technology Fin_Ene_Ele",   "AIM-Technology",        "AIMTechnologyFinEneEle",   "loss/(dem+loss)"
+    "Fin_Ene_Ele",    paste0(target_scenarios[[1]], " Fin_Ene_Ele"), target_scenarios[[1]], "ReferenceScenarioFinEneEle", "loss/(dem+loss)"
   )
 
   for (j in seq_len(nrow(loss_share_specs))) {
@@ -429,7 +453,7 @@ for (scenario_name in target_scenarios) {
       filter(
         Variable %in% c("Sec_Ene_Ele_Tra_Los_Dis", "Sec_Ene_Ele_Tra_Los_Tra"),
         Scenario == scenario_name,
-        Model == "PSM"
+        Model == target_scenarios[[2]]
       ) %>%
       select(Scenario, Region, Year, Model, Case, Variable, SplitLoss = Value) %>%
       inner_join(d_denominator, by = join_keys) %>%
@@ -494,24 +518,24 @@ for (scenario_name in target_scenarios) {
 
     save_png(
       plot = p,
-      filename = file.path(out_dir, paste0(scenario_name, "_TransmissionLossShare_", loss_share_specs$file_tag[j], "_global_softlink_31reg_world.png"))
+      filename = file.path(out_dir, paste0(scenario_name, "_TransmissionLossShare_", loss_share_specs$file_tag[j], "_biopotential_check_31reg_world.png"))
     )
   }
 }
 
-# plot_hydrogen ---------------------------------------------------------------
+# HYDROGEN PLOTS --------------------------------------------------------------
 # Run this section only when hydrogen plots are needed.
 hydrogen_specs <- tribble(
   ~var,                    ~ylab,                                  ~title,                           ~fname,
-  "Sec_Ene_Hyd",           "Hydrogen production (EJ/yr)",          "Hydrogen production",             "Hyd_global_softlink_Production_31reg_world.png",
-  "Sec_Ene_Hyd_Ele",       "Hydrogen from electrolysis (EJ/yr)",   "Hydrogen from electrolysis",      "Hyd_global_softlink_Electrolysis_31reg_world.png",
-  "Sec_Ene_Inp_Ele_Hyd",   "Electricity input to hydrogen (EJ/yr)","Electricity input to hydrogen",   "Hyd_global_softlink_ElectricityInput_31reg_world.png"
+  "Sec_Ene_Hyd",           "Hydrogen production (EJ/yr)",          "Hydrogen production",             "Hyd_biopotential_check_Production_31reg_world.png",
+  "Sec_Ene_Hyd_Ele",       "Hydrogen from electrolysis (EJ/yr)",   "Hydrogen from electrolysis",      "Hyd_biopotential_check_Electrolysis_31reg_world.png",
+  "Sec_Ene_Inp_Ele_Hyd",   "Electricity input to hydrogen (EJ/yr)","Electricity input to hydrogen",   "Hyd_biopotential_check_ElectricityInput_31reg_world.png"
 )
 hydrogen_ej_to_mwh <- 277777777.7777778
 hydrogen_gw_to_mw <- 1000
 hydrogen_hours_per_year <- 8760
 
-for (scenario_name in target_scenarios) {
+for (scenario_name in comparison_groups) {
   out_dir <- file.path(base_dir, scenario_name, "plot_hydrogen")
 
   for (i in seq_len(nrow(hydrogen_specs))) {
@@ -581,12 +605,12 @@ for (scenario_name in target_scenarios) {
 
     save_png(
       plot = p,
-      filename = file.path(out_dir, paste0(scenario_name, "_Hyd_CF_Electrolysis_global_softlink_31reg_world.png"))
+      filename = file.path(out_dir, paste0(scenario_name, "_Hyd_CF_Electrolysis_biopotential_check_31reg_world.png"))
     )
   }
 }
 
-# plot_power ------------------------------------------------------------------
+# POWER-GENERATION-MIX PLOTS --------------------------------------------------
 # Run this section only when power generation mix plots are needed.
 secele <- tribble(
   ~Variable,                  ~Legend,          ~Color,
@@ -618,7 +642,7 @@ df_secele <- df_base %>%
     Region = factor(Region, levels = region_list_plot)
   )
 
-for (scenario_name in target_scenarios) {
+for (scenario_name in comparison_groups) {
   d <- df_secele %>% filter(Scenario == scenario_name)
   if (nrow(d) == 0) next
 
@@ -648,15 +672,15 @@ for (scenario_name in target_scenarios) {
       base_dir,
       scenario_name,
       "plot_power",
-      paste0(scenario_name, "_power_generation_2050_global_softlink_31reg_world.png")
+      paste0(scenario_name, "_power_generation_2050_biopotential_check_31reg_world.png")
     ),
     width = 260,
     height = 300
   )
 }
 
-# scenario_analysis -----------------------------------------------------------
-# Compare all target scenarios in one plot.
+# SCENARIO COMPARISON PLOTS ---------------------------------------------------
+# Compare the two power-system scenarios in one plot.
 scenario_analysis_dir <- file.path(base_dir, "scenario_anarysis")
 
 scenario_shape <- setNames(
@@ -669,27 +693,16 @@ scenario_linetype <- setNames(
   target_scenarios
 )
 
-scenario_psm_color <- setNames(
-  rep(c("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#56B4E9"), length.out = length(target_scenarios)),
-  target_scenarios
-)
-scenario_series_levels <- c("AIM-Technology", paste("PSM", target_scenarios, sep = ": "))
-scenario_series_colors <- c(
-  "AIM-Technology" = "black",
-  setNames(unname(scenario_psm_color[target_scenarios]), paste("PSM", target_scenarios, sep = ": "))
-)
+scenario_series_levels <- target_scenarios
+scenario_series_colors <- model_color
 
 prep_scenario_line_data <- function(d, value_col = "Value") {
   d %>%
     mutate(
-      Scenario = factor(as.character(Scenario), levels = target_scenarios),
+      Scenario = factor(as.character(Scenario), levels = comparison_groups),
       Model = factor(as.character(Model), levels = names(model_color)),
       Region = factor(as.character(Region), levels = region_list_plot),
-      ScenarioSeries = if_else(
-        as.character(Model) == "AIM-Technology",
-        "AIM-Technology",
-        paste("PSM", as.character(Scenario), sep = ": ")
-      ),
+      ScenarioSeries = as.character(Model),
       ScenarioSeries = factor(ScenarioSeries, levels = scenario_series_levels)
     ) %>%
     filter(!is.na(.data[[value_col]]))
@@ -706,15 +719,15 @@ save_scenario_line_plot <- function(d, y_col, ylab, title, filename, folder, wid
       x = Year,
       y = .data[[y_col]],
       color = ScenarioSeries,
-      linetype = Scenario,
-      shape = Scenario,
-      group = interaction(Region, Model, Scenario)
+      linetype = Model,
+      shape = Model,
+      group = interaction(Region, Model)
     )
   ) +
     geom_line(linewidth = 0.35) +
     geom_point(size = 1.8, stroke = 0.5) +
     expand_limits(y = 0) +
-    scale_color_manual(values = scenario_series_colors, drop = TRUE, name = "Series") +
+    scale_color_manual(values = scenario_series_colors, drop = TRUE, name = "Scenario") +
     scale_linetype_manual(values = scenario_linetype, drop = TRUE, name = "Scenario") +
     scale_shape_manual(values = scenario_shape, drop = TRUE, name = "Scenario") +
     facet_wrap(~Region, ncol = facet_ncol, scales = "free_y", drop = FALSE) +
@@ -749,10 +762,10 @@ scenario_raw_line_specs <- bind_rows(
     mutate(folder = "plot_eleuse", file_prefix = "scenario_analysis_eleuse"),
   tribble(
     ~var,                    ~ylab,                                  ~title,                           ~fname,                                                        ~folder,              ~file_prefix,
-    "Sec_Ene_Ele_Tra_Los",   "Transmission Loss (EJ/yr)",            "Transmission loss",               "TransmissionLoss_global_softlink_31reg_world.png",            "plot_transmission",  "scenario_analysis_transmission",
-    "Sec_Ene_Hyd",           "Hydrogen production (EJ/yr)",          "Hydrogen production",             "Hyd_global_softlink_Production_31reg_world.png",              "plot_hydrogen",      "scenario_analysis_hydrogen",
-    "Sec_Ene_Hyd_Ele",       "Hydrogen from electrolysis (EJ/yr)",   "Hydrogen from electrolysis",      "Hyd_global_softlink_Electrolysis_31reg_world.png",            "plot_hydrogen",      "scenario_analysis_hydrogen",
-    "Sec_Ene_Inp_Ele_Hyd",   "Electricity input to hydrogen (EJ/yr)","Electricity input to hydrogen",   "Hyd_global_softlink_ElectricityInput_31reg_world.png",        "plot_hydrogen",      "scenario_analysis_hydrogen"
+    "Sec_Ene_Ele_Tra_Los",   "Transmission Loss (EJ/yr)",            "Transmission loss",               "TransmissionLoss_biopotential_check_31reg_world.png",            "plot_transmission",  "scenario_analysis_transmission",
+    "Sec_Ene_Hyd",           "Hydrogen production (EJ/yr)",          "Hydrogen production",             "Hyd_biopotential_check_Production_31reg_world.png",              "plot_hydrogen",      "scenario_analysis_hydrogen",
+    "Sec_Ene_Hyd_Ele",       "Hydrogen from electrolysis (EJ/yr)",   "Hydrogen from electrolysis",      "Hyd_biopotential_check_Electrolysis_31reg_world.png",            "plot_hydrogen",      "scenario_analysis_hydrogen",
+    "Sec_Ene_Inp_Ele_Hyd",   "Electricity input to hydrogen (EJ/yr)","Electricity input to hydrogen",   "Hyd_biopotential_check_ElectricityInput_31reg_world.png",        "plot_hydrogen",      "scenario_analysis_hydrogen"
   )
 )
 
@@ -788,7 +801,7 @@ for (i in seq_len(nrow(cf_specs))) {
     y_col = "CapacityFactor",
     ylab = "Capacity factor (%)",
     title = paste0(cf_specs$tech[i], " capacity factor scenario comparison (", case_name, ")"),
-    filename = paste0("scenario_analysis_CF_", cf_specs$file_tag[i], "_global_softlink_31reg_world.png"),
+    filename = paste0("scenario_analysis_CF_", cf_specs$file_tag[i], "_biopotential_check_31reg_world.png"),
     folder = "plot_CF"
   )
 }
@@ -826,7 +839,7 @@ for (j in seq_len(nrow(loss_share_specs))) {
     y_col = "LossShare",
     ylab = paste0(loss_share_specs$rate_label[j], " (%)"),
     title = paste0(loss_share_specs$rate_label[j], " scenario comparison (", case_name, ")"),
-    filename = paste0("scenario_analysis_TransmissionLossShare_", loss_share_specs$file_tag[j], "_global_softlink_31reg_world.png"),
+    filename = paste0("scenario_analysis_TransmissionLossShare_", loss_share_specs$file_tag[j], "_biopotential_check_31reg_world.png"),
     folder = "plot_transmission"
   )
 }
@@ -853,25 +866,25 @@ save_scenario_line_plot(
   y_col = "ElectrolyzerCapacityFactor",
   ylab = "Capacity factor (%)",
   title = paste0("Electrolyzer capacity factor scenario comparison (", case_name, ")"),
-  filename = "scenario_analysis_Hyd_CF_Electrolysis_global_softlink_31reg_world.png",
+  filename = "scenario_analysis_Hyd_CF_Electrolysis_biopotential_check_31reg_world.png",
   folder = "plot_hydrogen"
 )
 
-power_model_label <- c("AIM-Technology" = "AIM", "PSM" = "PSM")
+power_model_label <- setNames(target_scenarios, target_scenarios)
 scenario_power_x_axis <- expand_grid(
-  Scenario = target_scenarios,
+  Scenario = comparison_groups,
   Model = names(model_color)
 ) %>%
   mutate(
     level = paste(Scenario, Model, sep = " | "),
-    label = paste(Scenario, power_model_label[Model], sep = "\n")
+    label = unname(power_model_label[Model])
   )
 scenario_power_x_levels <- scenario_power_x_axis$level
 scenario_power_x_labels <- setNames(scenario_power_x_axis$label, scenario_power_x_axis$level)
 
 df_secele_scenario <- df_secele %>%
   mutate(
-    Scenario = factor(as.character(Scenario), levels = target_scenarios),
+    Scenario = factor(as.character(Scenario), levels = comparison_groups),
     Model = factor(as.character(Model), levels = names(model_color)),
     ScenarioModel = factor(paste(Scenario, Model, sep = " | "), levels = scenario_power_x_levels),
     Region = factor(as.character(Region), levels = region_list_plot)
@@ -908,7 +921,7 @@ if (nrow(df_secele_scenario_nonzero) > 0) {
     filename = file.path(
       scenario_analysis_dir,
       "plot_power",
-      "scenario_analysis_power_generation_2050_global_softlink_31reg_world.png"
+      "scenario_analysis_power_generation_2050_biopotential_check_31reg_world.png"
     ),
     width = 300,
     height = 300
@@ -916,11 +929,11 @@ if (nrow(df_secele_scenario_nonzero) > 0) {
 
   model_grouped_power_x_axis <- expand_grid(
     Model = names(model_color),
-    Scenario = target_scenarios
+    Scenario = comparison_groups
   ) %>%
     mutate(
       level = paste(Model, Scenario, sep = " | "),
-      label = paste(power_model_label[Model], Scenario, sep = "\n")
+      label = unname(power_model_label[Model])
     )
   model_grouped_power_x_levels <- model_grouped_power_x_axis$level
   model_grouped_power_x_labels <- setNames(model_grouped_power_x_axis$label, model_grouped_power_x_axis$level)
@@ -956,7 +969,7 @@ if (nrow(df_secele_scenario_nonzero) > 0) {
     filename = file.path(
       scenario_analysis_dir,
       "plot_power",
-      "scenario_analysis_power_generation_2050_model_grouped_global_softlink_31reg_world.png"
+      "scenario_analysis_power_generation_2050_model_grouped_biopotential_check_31reg_world.png"
     ),
     width = 300,
     height = 300
