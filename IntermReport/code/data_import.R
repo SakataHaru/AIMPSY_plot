@@ -33,7 +33,16 @@ read_iamc_gdx <- function(main_dir, model_name) {
   )
 }
 
-import_model_data <- function(aimt_main_dir, psm_main_dir, psm_primary_dir) {
+import_model_data <- function(
+  aimt_main_dir,
+  psm_main_dir,
+  psm_primary_dir,
+  scenario_map,
+  variable_specs,
+  gams_system_dir
+) {
+  gdxrrw::igdx(gams_system_dir)
+
   message("Reading AIM-Technology IAMC data: ", file.path(aimt_main_dir, "merged_output.gdx"))
   aimt_iamc <- read_iamc_gdx(aimt_main_dir, "AIM-Technology")
 
@@ -43,13 +52,125 @@ import_model_data <- function(aimt_main_dir, psm_main_dir, psm_primary_dir) {
   list(
     aimt_iamc = aimt_iamc,
     psm_iamc = psm_iamc,
+    variable_specs = variable_specs,
     metadata = list(
       aimt_main_dir = aimt_main_dir,
       aimt_iamc_gdx = file.path(aimt_main_dir, "merged_output.gdx"),
       psm_main_dir = psm_main_dir,
       psm_iamc_gdx = file.path(psm_main_dir, "merged_output.gdx"),
       psm_primary_dir = psm_primary_dir,
+      scenario_map = scenario_map,
+      gams_system_dir = gams_system_dir,
       iamc_symbol = "iamc_gdx"
+    )
+  )
+}
+
+# 2050 primary data are read only when Fig. 2-b--d are built. The source file
+# itself is year-specific; only the three required symbols are loaded. Flows
+# are reduced over their primary-time dimensions immediately to avoid retaining
+# millions of timeslice rows in the figure data list.
+primary_time_weight_from_timeresol <- function(time_resol) {
+  key <- toupper(trimws(time_resol))
+  weights <- c(
+    "12DAY" = ceiling(365 / 12 * 1000) / 1000,
+    "6HOUR" = 6,
+    "4HOUR" = 4,
+    "3HOUR" = 3,
+    "1HOUR" = 1
+  )
+  if (length(key) != 1L || is.na(key) || !key %in% names(weights)) {
+    stop("Unsupported time_resol: ", time_resol)
+  }
+  unname(weights[[key]])
+}
+
+load_psm_primary <- function(
+  psm_primary_dir,
+  scenario_map,
+  year = 2050L,
+  time_resol,
+  gams_system_dir,
+  region_map_path
+) {
+  if (length(year) != 1L || is.na(year) || year != as.integer(year)) {
+    stop("Primary year must be one integer model year.")
+  }
+  if (anyDuplicated(scenario_map) || anyDuplicated(names(scenario_map))) {
+    stop("scenario_map must contain unique scenario names and keys.")
+  }
+  time_weight <- primary_time_weight_from_timeresol(time_resol)
+  gdxrrw::igdx(gams_system_dir)
+
+  read_symbol <- function(gdx_path, scenario, symbol) {
+    raw <- gdxrrw::rgdx.param(
+      normalizePath(gdx_path, winslash = "\\", mustWork = TRUE), symbol
+    )
+    if (!all(c("L", symbol) %in% names(raw))) {
+      stop(symbol, " lacks the expected L index or value field: ", gdx_path)
+    }
+    out <- raw %>%
+      dplyr::transmute(
+        Scenario = scenario,
+        Link = as.character(.data$L),
+        Value = as.numeric(.data[[symbol]])
+      ) %>%
+      dplyr::group_by(.data$Scenario, .data$Link) %>%
+      dplyr::summarise(Value = sum(.data$Value), .groups = "drop")
+    message(
+      "  ", symbol, ": columns=", paste(names(raw), collapse = ","),
+      "; rows=", nrow(raw), "; aggregated_links=", nrow(out)
+    )
+    rm(raw)
+    if (any(!is.finite(out$Value))) {
+      stop("Non-finite primary values in ", symbol, ": ", gdx_path)
+    }
+    if (symbol != "vfs_l") {
+      out$Value <- out$Value * time_weight * 3.6e-6
+    }
+    out
+  }
+
+  scenario_paths <- stats::setNames(
+    file.path(psm_primary_dir, unname(scenario_map), paste0(year, ".gdx")),
+    unname(scenario_map)
+  )
+  missing_paths <- scenario_paths[!file.exists(scenario_paths)]
+  if (length(missing_paths) > 0L) {
+    stop("Missing PSM primary GDX: ", paste(missing_paths, collapse = ", "))
+  }
+  if (!file.exists(region_map_path)) {
+    stop("Missing PSM node-to-region map: ", region_map_path)
+  }
+  region_map_raw <- utils::read.csv(region_map_path, stringsAsFactors = FALSE)
+  if (!all(c("N_IND", "R31") %in% names(region_map_raw))) {
+    stop("PSM region map must contain N_IND and R31: ", region_map_path)
+  }
+  region_map <- region_map_raw %>%
+    dplyr::transmute(Node = as.character(.data$N_IND), Region = as.character(.data$R31)) %>%
+    dplyr::distinct()
+  by_symbol <- list(vfs_l = list(), vff_l = list(), vfb_l = list())
+  for (scenario in unname(scenario_map)) {
+    gdx_path <- scenario_paths[[scenario]]
+    message("Reading PSM primary ", year, " / ", scenario, ": ", gdx_path)
+    for (symbol in names(by_symbol)) {
+      by_symbol[[symbol]][[scenario]] <- read_symbol(gdx_path, scenario, symbol)
+    }
+  }
+  list(
+    psm_vfs_l = dplyr::bind_rows(by_symbol$vfs_l),
+    psm_vff_l = dplyr::bind_rows(by_symbol$vff_l),
+    psm_vfb_l = dplyr::bind_rows(by_symbol$vfb_l),
+    psm_region_map = region_map,
+    metadata = list(
+      year = as.integer(year),
+      time_resol = time_resol,
+      time_weight_hours = time_weight,
+      capacity_unit = "GW",
+      flow_unit = "EJ/yr",
+      scenario_map = scenario_map,
+      gdx_paths = scenario_paths,
+      region_map_path = normalizePath(region_map_path, winslash = "/", mustWork = TRUE)
     )
   )
 }

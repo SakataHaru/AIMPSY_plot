@@ -1,31 +1,42 @@
 # COMMON PLOT STYLE ------------------------------------------------------------
 
-BASE_FONT_SIZE_PT <- 8
-AXIS_TEXT_SIZE_PT <- 7
-AXIS_TITLE_SIZE_PT <- 8
-LEGEND_TEXT_SIZE_PT <- 7
-LEGEND_TITLE_SIZE_PT <- 8
-PLOT_TAG_SIZE_PT <- 9
-PANEL_MARGIN_MM <- 1.5
-
-theme_paper <- function(base_size = BASE_FONT_SIZE_PT) {
-  ggplot2::theme_bw(base_size = base_size) +
-    ggplot2::theme(
-      axis.text = ggplot2::element_text(size = AXIS_TEXT_SIZE_PT),
-      axis.title = ggplot2::element_text(size = AXIS_TITLE_SIZE_PT),
-      legend.text = ggplot2::element_text(size = LEGEND_TEXT_SIZE_PT),
-      legend.title = ggplot2::element_text(size = LEGEND_TITLE_SIZE_PT),
-      legend.position = "right",
-      plot.tag = ggplot2::element_text(size = PLOT_TAG_SIZE_PT, face = "bold"),
-      plot.margin = ggplot2::margin(
-        PANEL_MARGIN_MM,
-        PANEL_MARGIN_MM,
-        PANEL_MARGIN_MM,
-        PANEL_MARGIN_MM,
-        unit = "mm"
-      )
-    )
-}
+MyTheme <- ggplot2::theme_bw() +
+  ggplot2::theme(
+    panel.border = ggplot2::element_blank(),
+    panel.grid.minor = ggplot2::element_line(color = NA),
+    axis.line = ggplot2::element_line(colour = "black"),
+    panel.background = ggplot2::element_rect(fill = "white"),
+    panel.grid.major = ggplot2::element_blank(),
+    strip.background = ggplot2::element_rect(fill = "white", colour = "white"),
+    strip.text.x = ggplot2::element_text(
+      size = 8,
+      colour = "black",
+      angle = 0,
+      face = "bold"
+    ),
+    strip.text.y = ggplot2::element_text(
+      size = 8,
+      colour = "black",
+      angle = 270,
+      face = "bold"
+    ),
+    axis.text.x = ggplot2::element_text(
+      size = 8,
+      angle = 45,
+      vjust = 0.9,
+      hjust = 1,
+      margin = ggplot2::margin(t = 0.1, r = 0, b = 0, l = 0, unit = "cm")
+    ),
+    axis.text.y = ggplot2::element_text(
+      size = 8,
+      margin = ggplot2::margin(t = 0, r = 0.3, b = 0, l = 0, unit = "cm")
+    ),
+    axis.title.x = ggplot2::element_blank(),
+    legend.text = ggplot2::element_text(size = 9),
+    legend.title = ggplot2::element_text(size = 8),
+    axis.ticks.length = grid::unit(0.15, "cm"),
+    plot.tag = ggplot2::element_text(face = "bold")
+  )
 
 
 # COMMON COLOR DEFINITIONS -----------------------------------------------------
@@ -39,9 +50,70 @@ SCENARIO_COLORS <- c(
   SYF = "#2C7BB6"  # blue placeholder
 )
 
-# TODO: Add named colors here only after technology/carrier labels are confirmed.
-TECHNOLOGY_COLORS <- character(0)
-CARRIER_COLORS <- character(0)
+CARRIER_LEVELS <- c(
+  "Coal", "Liquids-fossil", "Gas-fossil", "Biomass", "Solar",
+  "Electricity", "Heat", "Hydrogen", "Ammonia", "Synfuel"
+)
+CARRIER_COLORS <- c(
+  "Coal" = "grey70",
+  "Liquids-fossil" = "sandybrown",
+  "Gas-fossil" = "moccasin",
+  "Biomass" = "#A9D65D",
+  "Solar" = "lightsalmon",
+  "Electricity" = "lightsteelblue",
+  "Heat" = "salmon",
+  "Hydrogen" = "thistle2",
+  "Ammonia" = "plum3",
+  "Synfuel" = "mediumorchid1"
+)
+
+# Fig. 1-c separates power-sector emissions from the former aggregate
+# energy-supply category. Other supply retains the legacy emisec color.
+EMISSION_POWER_COLOR <- "gold"
+
+FIG2_FLOW_COLORS <- c(
+  "Hydrogen" = unname(CARRIER_COLORS[["Hydrogen"]]),
+  "Ammonia" = "darkslateblue",
+  "Synfuel" = unname(CARRIER_COLORS[["Synfuel"]]),
+  "Other" = "grey65",
+  "Loss" = "grey85"
+)
+
+# Conversion efficiencies in the model-side link definition for the current
+# PSM interface. Values are applied to annual link activity (input basis).
+FIG2_CONVERSION_EFFICIENCY <- c(
+  electrolysis = 0.70,
+  haber_bosch = 5.2 / (0.18 * 33.4),
+  nh3_cracking = 0.99 * 0.85,
+  fischer_tropsch = 0.73,
+  methanation = 0.77
+)
+
+# This is the existing ALLPLOT_ENERGY classification with ammonia separated
+# from Fin_Ene_Hyd. The duplicated ammonia row subtracts it from direct H2.
+FINAL_ENERGY_SPEC <- tibble::tribble(
+  ~Variable, ~PlotVariable, ~Legend, ~Color, ~Multiplier,
+  "Fin_Ene_SolidsCoa",   "Fin_Ene_SolidsCoa", "Coal",            "grey70",        1,
+  "Fin_Ene_Liq_Oil",     "Fin_Ene_Liq_Oil",   "Liquids-fossil",  "sandybrown",     1,
+  "Fin_Ene_Gas_Fos",     "Fin_Ene_Gas_Fos",   "Gas-fossil",      "moccasin",       1,
+  "Fin_Ene_SolidsBio",   "Fin_Ene_Biomass",   "Biomass",         "#A9D65D",        1,
+  "Fin_Ene_Liq_Bio",     "Fin_Ene_Biomass",   "Biomass",         "#A9D65D",        1,
+  "Fin_Ene_Solar",       "Fin_Ene_Solar",     "Solar",           "lightsalmon",    1,
+  "Fin_Ene_Ele",         "Fin_Ene_Ele",       "Electricity",     "lightsteelblue", 1,
+  "Fin_Ene_Heat",        "Fin_Ene_Heat",      "Heat",            "salmon",         1,
+  "Fin_Ene_Hyd",         "Fin_Ene_Hyd",       "Hydrogen",        "thistle2",       1,
+  "Fin_Ene_Hyd_Amm",     "Fin_Ene_Hyd",       "Hydrogen",        "thistle2",      -1,
+  "Fin_Ene_Hyd_Amm",     "Fin_Ene_Hyd_Amm",   "Ammonia",         "plum3",          1,
+  "Fin_Ene_Liq_Hyd_syn", "Fin_Ene_Hyd_syn",   "Synfuel",         "mediumorchid1",  1,
+  "Fin_Ene_Gas_Hyd_syn", "Fin_Ene_Hyd_syn",   "Synfuel",         "mediumorchid1",  1
+)
+
+PSM_WORLD_REGIONS <- c(
+  "JPN", "CHN", "IND", "IDN", "KOR", "THA", "MYS", "VNM",
+  "XSE", "XSA", "XEA", "XCS", "XME", "AUS", "XOC", "CAN",
+  "USA", "XE15", "XE10", "XE3", "TUR", "XEWI", "XEEI", "XENI",
+  "RUS", "MEX", "BRA", "XLM", "ZAF", "XAF", "XNF"
+)
 
 
 # LEGACY VARIABLE AND COLOR SPECIFICATIONS ------------------------------------
@@ -82,127 +154,74 @@ load_variable_specs <- function(path) {
 }
 
 
-# PHYSICAL PANEL AND FIGURE SIZES ---------------------------------------------
-# All values are final allocated dimensions in mm. Replace placeholders panel by
-# panel after the journal layout is fixed. Full-width panels include column gaps.
-
-FIGURE_WIDTH_MM <- 180
-PANEL_GAP_MM <- 4
-
-FIG_SIZE <- list(
-  fig1 = list(
-    a = c(width_mm = 88, height_mm = 55),
-    b = c(width_mm = 88, height_mm = 55),
-    c = c(width_mm = 88, height_mm = 55),
-    d = c(width_mm = 88, height_mm = 55),
-    e = c(width_mm = 180, height_mm = 55)
-  ),
-  # TODO: Add panels and revise the placeholder height when Fig. 2 is designed.
-  fig2 = list(
-    a = c(width_mm = 180, height_mm = 100)
-  ),
-  fig3 = list(
-    a = c(width_mm = 88, height_mm = 80),
-    b = c(width_mm = 88, height_mm = 80)
-  )
-)
-
-# The # cells are physical gaps, not plots. A full-width panel spans the gap and
-# therefore starts with the full allocated width instead of being stretched later.
-FIG_LAYOUT <- list(
-  fig1 = list(
-    design = "A#B\n###\nC#D\n###\nEEE",
-    widths_mm = c(88, PANEL_GAP_MM, 88),
-    heights_mm = c(55, PANEL_GAP_MM, 55, PANEL_GAP_MM, 55),
-    key_to_panel = c(A = "a", B = "b", C = "c", D = "d", E = "e")
-  ),
-  fig2 = list(
-    design = "A",
-    widths_mm = FIG_SIZE$fig2$a[["width_mm"]],
-    heights_mm = FIG_SIZE$fig2$a[["height_mm"]],
-    key_to_panel = c(A = "a")
-  ),
-  fig3 = list(
-    design = "A#B",
-    widths_mm = c(88, PANEL_GAP_MM, 88),
-    heights_mm = 80,
-    key_to_panel = c(A = "a", B = "b")
-  )
-)
-
-get_panel_size_mm <- function(figure, panel) {
-  if (!figure %in% names(FIG_SIZE)) {
-    stop("Unknown figure: ", figure)
-  }
-  if (!panel %in% names(FIG_SIZE[[figure]])) {
-    stop("Unknown panel '", panel, "' for ", figure)
-  }
-
-  size <- FIG_SIZE[[figure]][[panel]]
-  if (!identical(names(size), c("width_mm", "height_mm")) ||
-      any(!is.finite(size)) || any(size <= 0)) {
-    stop("Invalid physical size for ", figure, " panel ", panel)
-  }
-  size
-}
-
-get_figure_size_mm <- function(figure) {
-  if (!figure %in% names(FIG_LAYOUT)) {
-    stop("Unknown figure: ", figure)
-  }
-
-  layout <- FIG_LAYOUT[[figure]]
-  c(
-    width_mm = sum(layout$widths_mm),
-    height_mm = sum(layout$heights_mm)
-  )
-}
-
-validate_figure_layout <- function(figure) {
-  layout <- FIG_LAYOUT[[figure]]
-  design_rows <- strsplit(layout$design, "\n", fixed = TRUE)[[1]]
-  design_matrix <- do.call(rbind, strsplit(design_rows, "", fixed = TRUE))
-
-  if (ncol(design_matrix) != length(layout$widths_mm) ||
-      nrow(design_matrix) != length(layout$heights_mm)) {
-    stop("Layout track counts do not match physical dimensions for ", figure)
-  }
-
-  for (layout_key in names(layout$key_to_panel)) {
-    panel_name <- unname(layout$key_to_panel[[layout_key]])
-    cells <- which(design_matrix == layout_key, arr.ind = TRUE)
-    if (nrow(cells) == 0L) {
-      stop("Layout key '", layout_key, "' is absent from ", figure)
-    }
-
-    allocated <- c(
-      width_mm = sum(layout$widths_mm[unique(cells[, "col"])]),
-      height_mm = sum(layout$heights_mm[unique(cells[, "row"])])
-    )
-    configured <- get_panel_size_mm(figure, panel_name)
-    if (!isTRUE(all.equal(allocated, configured, tolerance = 1e-8))) {
-      stop(
-        "FIG_SIZE and FIG_LAYOUT disagree for ", figure, " panel ", panel_name,
-        ": configured ", paste(configured, collapse = " x "),
-        " mm; allocated ", paste(allocated, collapse = " x "), " mm"
-      )
-    }
-  }
-
-  figure_size <- get_figure_size_mm(figure)
-  if (!isTRUE(all.equal(unname(figure_size[["width_mm"]]), FIGURE_WIDTH_MM))) {
-    stop(figure, " width does not equal FIGURE_WIDTH_MM")
-  }
-
-  invisible(TRUE)
-}
-
-
 # PANEL AND FIGURE HELPERS -----------------------------------------------------
 
 assert_panel_data <- function(data) {
-  if (!is.list(data) || !all(c("aimt_iamc", "psm_iamc", "metadata") %in% names(data))) {
+  if (!is.list(data) || !all(c("aimt_iamc", "psm_iamc", "variable_specs", "metadata") %in% names(data))) {
     stop("data must be the named list returned by import_model_data().")
+  }
+  invisible(TRUE)
+}
+
+assert_primary_data <- function(primary) {
+  required <- c("psm_vfs_l", "psm_vff_l", "psm_vfb_l", "psm_region_map", "metadata")
+  if (!is.list(primary) || !all(required %in% names(primary))) {
+    stop("primary must be the named list returned by load_psm_primary().")
+  }
+  invisible(TRUE)
+}
+
+primary_scenario_crosswalk <- function(primary) {
+  scenario_map <- primary$metadata$scenario_map
+  tibble::tibble(
+    Scenario = unname(scenario_map),
+    ScenarioKey = factor(names(scenario_map), levels = names(scenario_map))
+  )
+}
+
+split_primary_links <- function(dataset) {
+  link_parts <- strsplit(as.character(dataset$Link), "_", fixed = TRUE)
+  invalid <- lengths(link_parts) != 2L
+  if (any(invalid)) {
+    stop("Primary link labels must contain exactly one underscore. Examples: ",
+         paste(utils::head(unique(dataset$Link[invalid]), 3), collapse = ", "))
+  }
+  dplyr::mutate(
+    dataset,
+    Node0 = vapply(link_parts, `[[`, character(1), 1L),
+    Node1 = vapply(link_parts, `[[`, character(1), 2L)
+  )
+}
+
+primary_node_region <- function(nodes, region_map) {
+  node_core <- sub("-(AC|H2|H2TRD|NH3|NH3TRD|SYF|SYFTRD|SYM|SYMTRD)$", "", nodes)
+  explicit_r31 <- grepl("^R31-", node_core)
+  region <- region_map$Region[match(node_core, region_map$Node)]
+  region[explicit_r31] <- sub("^R31-", "", node_core[explicit_r31])
+  region
+}
+
+classify_transport_link <- function(link) {
+  dplyr::case_when(
+    grepl(".*-(H2|H2TRD)_.*-(H2|H2TRD)$", link) ~ "Hydrogen",
+    grepl("^R31-[A-Z0-9]+-(NH3|NH3TRD)_R31-[A-Z0-9]+-(NH3|NH3TRD)$", link) ~ "Ammonia",
+    grepl("^R31-[A-Z0-9]+-(SYF|SYFTRD)_R31-[A-Z0-9]+-(SYF|SYFTRD)$", link) ~ "Synfuel",
+    TRUE ~ NA_character_
+  )
+}
+
+scenario_crosswalk <- function(data) {
+  scenario_map <- data$metadata$scenario_map
+  tibble::tibble(
+    Scenario = unname(scenario_map),
+    ScenarioKey = factor(names(scenario_map), levels = names(scenario_map))
+  )
+}
+
+assert_variables_present <- function(dataset, variables, context) {
+  missing_variables <- setdiff(variables, unique(dataset$Variable))
+  if (length(missing_variables) > 0L) {
+    stop(context, " is missing variables: ", paste(missing_variables, collapse = ", "))
   }
   invisible(TRUE)
 }
@@ -217,7 +236,7 @@ make_panel_placeholder <- function(label) {
     ) +
     ggplot2::coord_cartesian(xlim = c(0, 1), ylim = c(0, 1), expand = FALSE) +
     ggplot2::labs(x = NULL, y = NULL) +
-    theme_paper() +
+    MyTheme +
     ggplot2::theme(
       axis.text = ggplot2::element_blank(),
       axis.ticks = ggplot2::element_blank(),
@@ -225,74 +244,24 @@ make_panel_placeholder <- function(label) {
     )
 }
 
-assemble_figure <- function(panel_plots, figure) {
-  validate_figure_layout(figure)
-  layout <- FIG_LAYOUT[[figure]]
-  expected_panels <- unname(layout$key_to_panel)
-  missing_panels <- setdiff(expected_panels, names(panel_plots))
-  extra_panels <- setdiff(names(panel_plots), expected_panels)
-  if (length(missing_panels) > 0L || length(extra_panels) > 0L) {
-    stop(
-      "Panel list for ", figure, " does not match its layout. Missing: ",
-      paste(missing_panels, collapse = ", "), "; extra: ",
-      paste(extra_panels, collapse = ", ")
-    )
+save_png_mm <- function(plot, path, width_mm, height_mm, dpi = 300, bg = "white") {
+  if (tolower(tools::file_ext(path)) != "png") {
+    stop("save_png_mm() only writes PNG files: ", path)
   }
-
-  plots_by_layout_key <- setNames(
-    panel_plots[unname(layout$key_to_panel)],
-    names(layout$key_to_panel)
-  )
-
-  assembled <- patchwork::wrap_plots(
-    plots_by_layout_key,
-    design = layout$design,
-    widths = layout$widths_mm,
-    heights = layout$heights_mm,
-    guides = "keep"
-  )
-  attr(assembled, "physical_size_mm") <- get_figure_size_mm(figure)
-  assembled
-}
-
-ensure_figure_output_dirs <- function(output_dir) {
-  invisible(lapply(
-    file.path(output_dir, names(FIG_SIZE)),
-    dir.create,
-    recursive = TRUE,
-    showWarnings = FALSE
-  ))
-}
-
-save_panel <- function(plot, figure, panel, path, dpi = 600, bg = "white") {
-  size <- get_panel_size_mm(figure, panel)
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  temporary_path <- tempfile("figure_", tmpdir = dirname(path), fileext = ".png")
+  on.exit(unlink(temporary_path), add = TRUE)
   ggplot2::ggsave(
-    filename = path,
+    filename = temporary_path,
     plot = plot,
-    width = unname(size[["width_mm"]]),
-    height = unname(size[["height_mm"]]),
+    width = width_mm,
+    height = height_mm,
     units = "mm",
     dpi = dpi,
-    limitsize = FALSE,
     bg = bg
   )
-  invisible(path)
-}
-
-save_figure <- function(plot, figure, path, dpi = 600, bg = "white") {
-  validate_figure_layout(figure)
-  size <- get_figure_size_mm(figure)
-  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
-  ggplot2::ggsave(
-    filename = path,
-    plot = plot,
-    width = unname(size[["width_mm"]]),
-    height = unname(size[["height_mm"]]),
-    units = "mm",
-    dpi = dpi,
-    limitsize = FALSE,
-    bg = bg
-  )
+  if (!file.copy(temporary_path, path, overwrite = TRUE)) {
+    stop("Could not update PNG output: ", path)
+  }
   invisible(path)
 }
