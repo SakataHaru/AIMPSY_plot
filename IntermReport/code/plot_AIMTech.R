@@ -1,9 +1,9 @@
 # PLOT SETTINGS ---------------------------------------------------------------
 
 AIMT_SCENARIO <- "softlink_IntermReport"
-AIMT_DATE <- "2609101645"
+AIMT_DATE <- "2609111525"
 
-target_scenarios <- c("500C-ELE", "500C-ELE-H2cost+", "500C-H2")
+target_scenarios <- c("500C-ELE+", "500C-ELE++", "500C-ELE+++")
 transition_years <- seq(2020, 2050, by = 5)
 car_years <- c(2030, 2050)
 
