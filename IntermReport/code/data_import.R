@@ -66,7 +66,7 @@ import_model_data <- function(
   )
 }
 
-# 2050 primary data are read only when Fig. 2-b--d are built. The source file
+# 2050 primary data are read only when Fig. 2-b--d or Fig. 3 are built. The source file
 # itself is year-specific; only the three required symbols are loaded. Flows
 # are reduced over their primary-time dimensions immediately to avoid retaining
 # millions of timeslice rows in the figure data list.
@@ -172,5 +172,32 @@ load_psm_primary <- function(
       gdx_paths = scenario_paths,
       region_map_path = normalizePath(region_map_path, winslash = "/", mustWork = TRUE)
     )
+  )
+}
+
+# Fig. 3 map inputs are the same coordinate sources used by ALLPLOT_TRADING.R,
+# copied under IntermReport/data for this report. No routes are inferred.
+load_fig3_geodata <- function(base_data_dir) {
+  node_path <- file.path(base_data_dir, "nodes_centroid.geojson")
+  trade_path <- file.path(base_data_dir, "searoute_r31_representative.geojson")
+  missing <- c(node_path, trade_path)[!file.exists(c(node_path, trade_path))]
+  if (length(missing)) stop("Missing Fig. 3 coordinate files: ", paste(missing, collapse = ", "))
+  nodes_raw <- sf::st_read(node_path, quiet = TRUE)
+  trade_raw <- sf::st_read(trade_path, quiet = TRUE)
+  if (!all(c("N_PSY", "centroid_x", "centroid_y") %in% names(nodes_raw)) ||
+      !all(c("R31", "Longitude", "Latitude") %in% names(trade_raw))) {
+    stop("Fig. 3 coordinate files have unexpected columns.")
+  }
+  list(
+    nodes = nodes_raw %>% sf::st_drop_geometry() %>%
+      dplyr::transmute(Node = as.character(.data$N_PSY),
+                       lon = as.numeric(.data$centroid_x), lat = as.numeric(.data$centroid_y)),
+    regions = trade_raw %>% sf::st_drop_geometry() %>%
+      dplyr::transmute(Region = sub("^R31-", "", as.character(.data$R31)),
+                       lon = as.numeric(.data$Longitude), lat = as.numeric(.data$Latitude)),
+    basemap = rnaturalearth::ne_countries(scale = "medium", returnclass = "sf") %>%
+      sf::st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>%
+      sf::st_make_valid(),
+    metadata = list(node_path = node_path, trade_path = trade_path)
   )
 }

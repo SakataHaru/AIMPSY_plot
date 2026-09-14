@@ -32,6 +32,7 @@ IntermReport/
 │  │  ├─ fig2_c.R
 │  │  └─ fig2_d.R
 │  └─ fig3/
+│     ├─ fig3_common.R
 │     ├─ fig3_a.R
 │     └─ fig3_b.R
 ├─ data/
@@ -75,6 +76,9 @@ Fig.2はa–dの4 panelで構成する。b–dは2050年primary GDXを共有し�
 - `BUILD_FIGURES`
 - `SAVE_INDIVIDUAL_PANELS`
 - `SAVE_FINAL_FIGURES`
+- `FIG3_SCENARIO`
+- `FIG3_LAYOUT`
+- `FIG3_NODE_THRESHOLD`およびcarrier別flow threshold
 
 run tokenは既存のproducer pathからそのまま転記し、現在時刻から生成しない。AIM-Technologyの標準パスは `<root>/<scenario>/<run-date>/main`、PSMは `<root>/<scenario>/<region>/<run-date>/main` とする。
 
@@ -112,7 +116,7 @@ data <- list(
 
 Figure固有の `filter()`、`group_by()`、`summarise()`、地域集約、scenario選択、年選択、単位変換はここへ置かない。
 
-Fig.2-b–dのprimary GDXは `load_psm_primary()` で必要になった時点で一度だけ読む。年別GDXから
+Fig.2-b–dとFig.3のprimary GDXは `load_psm_primary()` で必要になった時点で一度だけ読む。年別GDXから
 `vfs_l`、`vff_l`、`vfb_l`だけを読み、リンク単位まで直ちに集約してpanel previewとcombined
 Figureで共有する。`vfs_l`はGWの年次設備容量として時間重みを掛けない。`vff_l`と`vfb_l`は
 `time_resol`に対応する時間数を掛け、`3.6e-6`でGWhからEJへ変換する。
@@ -178,6 +182,14 @@ Fig.1は現在a–dの4 panelとする。aは世界最終エネルギー需要�
 storage loss・transmission lossをscenario facetで表示する。Fig.1内のplot titleは置かず、
 小文字panel labelとfacet見出しを使う。
 
+Fig.3は2050年のPSM結果を使い、aで発電構成と送電、bで水素供給・利用とH2/NH3/Synfuel輸送を
+地図表示する。`fig3_common.R`には共通地図、node glyph、gross link集計を置く。node glyphは
+`nodes_centroid.geojson`に一致する詳細PSM地域だけを使い、IAMC内のR31集計値との二重計上を避ける。
+NH3/Synfuelの長距離輸送だけは`searoute_r31_representative.geojson`のR31代表点を使い、実航路を
+補間しない。aのcircle areaは年間発電量、bの上下半円areaはそれぞれH2 supply/use、line widthは
+primaryの`vff_l + vfb_l`から得たgross annual link throughputに比例させる。閾値は描画時だけ適用し、
+元集計は保持する。`FIG3_SCENARIO`で代表scenario、`FIG3_LAYOUT`で上下・左右配置を切り替える。
+
 ## 4. 物理サイズの管理
 
 ggplot object自体は物理的なwidth/heightを持たず、描画deviceで寸法が決まる。panel単体とcombined Figureの寸法は、`main.R` の各 `save_png_mm()` 呼び出しにmm単位で明示する。
@@ -212,6 +224,10 @@ Fig.2は上段をa:b = 4:1、下段をc:d = 3:2とし、段間に共通凡例を
 |     scenario legend |
 |     c     |   d   |
 ```
+
+Fig.3は地図の可読性を優先し、当面は通常の論文サイズ制限を適用しない。defaultは300 × 270 mmの
+上下2段配置で、`FIG3_LAYOUT <- "horizontal"`の場合は400 × 135 mmの左右配置を生成する。
+panel labelは小文字の`a`、`b`を結合時に付ける。
 
 凡例は、凡例を持つplotから `cowplot::get_plot_component()` で位置を指定して抽出する。抽出時に `legend.position`、`legend.direction`、`legend.key.size`、`legend.spacing`、`guides()`を設定する。panel grid内では元plotの凡例を `legend.position = "none"` で隠し、抽出した凡例grobsを `plot_grid()` の独立要素として配置する。
 

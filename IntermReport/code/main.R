@@ -40,6 +40,16 @@ SAVE_INDIVIDUAL_PANELS <- TRUE
 SAVE_FINAL_FIGURES <- TRUE
 BUILD_FIG2 <- TRUE
 
+# Fig. 3 representative scenario. Use one of 1.5C-ELE / 1.5C-H2 / 1.5C-SYF.
+FIG3_SCENARIO <- "1.5C-H2"
+BUILD_FIG3 <- TRUE
+FIG3_LAYOUT <- "vertical" # "vertical" or "horizontal"
+FIG3_NODE_THRESHOLD <- 0.1
+FIG3_POWER_FLOW_THRESHOLD <- 0.01
+FIG3_H2_FLOW_THRESHOLD <- 0.01
+FIG3_NH3_FLOW_THRESHOLD <- 0.01
+FIG3_SYF_FLOW_THRESHOLD <- 0.01
+
 
 # PACKAGES AND SCRIPT LOCATION ------------------------------------------------
 
@@ -48,6 +58,8 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(gdxrrw)
   library(cowplot)
+  library(sf)
+  library(rnaturalearth)
   library(tibble)
 })
 
@@ -94,6 +106,7 @@ panel_files <- c(
   "fig2/fig2_b.R",
   "fig2/fig2_c.R",
   "fig2/fig2_d.R",
+  "fig3/fig3_common.R",
   "fig3/fig3_a.R",
   "fig3/fig3_b.R"
 )
@@ -132,6 +145,14 @@ if (length(target_scenarios) == 0L || any(!nzchar(target_scenarios)) ||
     is.null(names(target_scenarios)) || any(!nzchar(names(target_scenarios))) ||
     anyDuplicated(names(target_scenarios)) || anyDuplicated(target_scenarios)) {
   stop("target_scenarios must be a uniquely named scenario mapping.")
+}
+fig3_scenario_key <- sub("^1[.]5C-", "", trimws(FIG3_SCENARIO), ignore.case = TRUE)
+if (!fig3_scenario_key %in% names(target_scenarios)) {
+  stop("FIG3_SCENARIO must identify one of: ", paste0("1.5C-", names(target_scenarios), collapse = ", "))
+}
+fig3_model_scenario <- unname(target_scenarios[[fig3_scenario_key]])
+if (!FIG3_LAYOUT %in% c("vertical", "horizontal")) {
+  stop("FIG3_LAYOUT must be 'vertical' or 'horizontal'.")
 }
 
 aimt_main_dir <- file.path(
@@ -172,7 +193,7 @@ build_fig1 <- function(
   fig1_c <- make_fig1_c(data)
   fig1_d <- make_fig1_d(data)
 
-  # LEGENDS -------------------------------------------------------------------
+  # LEGENDS 
   legend_a <- cowplot::get_plot_component(
     fig1_a +
       ggplot2::guides(fill = ggplot2::guide_legend(ncol = 1, reverse = TRUE)) +
@@ -208,7 +229,7 @@ build_fig1 <- function(
     "guide-box-right"
   )
 
-  # FIGURE 1 LAYOUT -----------------------------------------------------------
+  # FIGURE 1 LAYOUT 
   # |              a | final-energy legend |
   # |        b (60%) | c | emissions legend |
   # |              d | electricity legend  |
@@ -273,6 +294,7 @@ build_fig1 <- function(
   invisible(list(panels = panels, figure = fig1))
 }
 
+# FIGURE 2 -----------------------------------------------------------
 build_fig2 <- function(
   data,
   primary_2050,
@@ -289,7 +311,7 @@ build_fig2 <- function(
   fig2_d <- make_fig2_d(primary_2050)
   panels <- list(a = fig2_a, b = fig2_b, c = fig2_c, d = fig2_d)
 
-  # LEGEND --------------------------------------------------------------------
+  # LEGEND 
   scenario_legend <- cowplot::get_plot_component(
     fig2_a +
       ggplot2::guides(
@@ -306,7 +328,7 @@ build_fig2 <- function(
     "guide-box-bottom"
   )
 
-  # FIGURE 2 LAYOUT -----------------------------------------------------------
+  # FIGURE 2 LAYOUT 
   # |       a       | b |
   # |     scenario legend |
   # |     c     |   d   |
@@ -348,6 +370,50 @@ build_fig2 <- function(
   invisible(list(panels = panels, figure = fig2))
 }
 
+# FIGURE 3 -----------------------------------------------------------
+build_fig3 <- function(
+  data, primary_2050, geodata, scenario, output_dir,
+  save_individual_panels = FALSE, save_final_figure = FALSE
+) {
+  fig3_output_dir <- file.path(output_dir, "fig3")
+  dir.create(fig3_output_dir, recursive = TRUE, showWarnings = FALSE)
+  fig3_a <- make_fig3_a(
+    data, primary_2050, geodata, scenario,
+    FIG3_NODE_THRESHOLD, FIG3_POWER_FLOW_THRESHOLD
+  )
+  fig3_b <- make_fig3_b(
+    data, primary_2050, geodata, scenario,
+    FIG3_NODE_THRESHOLD, FIG3_H2_FLOW_THRESHOLD,
+    FIG3_NH3_FLOW_THRESHOLD, FIG3_SYF_FLOW_THRESHOLD
+  )
+  # Size restrictions are intentionally not applied to the first Fig. 3 map.
+  # Vertical is the readable default; horizontal remains available for review.
+  if (FIG3_LAYOUT == "vertical") {
+    fig3 <- cowplot::plot_grid(
+      fig3_a, fig3_b, ncol = 1,
+      labels = c("a", "b"), label_size = 14, rel_heights = c(1, 1)
+    )
+    final_size_mm <- c(width = 300, height = 270)
+  } else {
+    fig3 <- cowplot::plot_grid(
+      fig3_a, fig3_b, nrow = 1,
+      labels = c("a", "b"), label_size = 14, rel_widths = c(1, 1)
+    )
+    final_size_mm <- c(width = 400, height = 135)
+  }
+  if (isTRUE(save_individual_panels)) {
+    save_png_mm(fig3_a, file.path(fig3_output_dir, "fig3_a.png"), 300, 135)
+    save_png_mm(fig3_b, file.path(fig3_output_dir, "fig3_b.png"), 300, 135)
+  }
+  if (isTRUE(save_final_figure)) {
+    save_png_mm(
+      fig3, file.path(fig3_output_dir, "fig3.png"),
+      final_size_mm[["width"]], final_size_mm[["height"]]
+    )
+  }
+  invisible(list(panels = list(a = fig3_a, b = fig3_b), figure = fig3))
+}
+
 
 # RUN -------------------------------------------------------------------------
 
@@ -375,21 +441,38 @@ if (isTRUE(BUILD_FIGURES)) {
     )
   )
 
-  if (isTRUE(BUILD_FIG2)) {
+  primary_2050 <- NULL
+  if (isTRUE(BUILD_FIG2) || isTRUE(BUILD_FIG3)) {
     # Read the year-specific primary symbols once, then reuse the aggregated
-    # object for all panel previews and the combined Fig. 2.
+    # object for all panel previews and the combined Fig. 2 / Fig. 3.
+    primary_scenarios <- if (isTRUE(BUILD_FIG2)) {
+      target_scenarios
+    } else {
+      target_scenarios[fig3_scenario_key]
+    }
     primary_2050 <- load_psm_primary(
       psm_primary_dir = psm_primary_dir,
-      scenario_map = target_scenarios,
+      scenario_map = primary_scenarios,
       year = 2050,
       time_resol = time_resol,
       gams_system_dir = GAMS_SYSTEM_DIR,
       region_map_path = PSM_REGION_MAP_FILE
     )
+  }
+  if (isTRUE(BUILD_FIG2)) {
     figure_results$fig2 <- build_fig2(
       data = data,
       primary_2050 = primary_2050,
       output_dir = output_dir,
+      save_individual_panels = SAVE_INDIVIDUAL_PANELS,
+      save_final_figure = SAVE_FINAL_FIGURES
+    )
+  }
+  if (isTRUE(BUILD_FIG3)) {
+    fig3_geodata <- load_fig3_geodata(file.path(project_dir, "data"))
+    figure_results$fig3 <- build_fig3(
+      data = data, primary_2050 = primary_2050, geodata = fig3_geodata,
+      scenario = fig3_model_scenario, output_dir = output_dir,
       save_individual_panels = SAVE_INDIVIDUAL_PANELS,
       save_final_figure = SAVE_FINAL_FIGURES
     )

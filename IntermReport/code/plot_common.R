@@ -260,8 +260,23 @@ save_png_mm <- function(plot, path, width_mm, height_mm, dpi = 300, bg = "white"
     dpi = dpi,
     bg = bg
   )
-  if (!file.copy(temporary_path, path, overwrite = TRUE)) {
-    stop("Could not update PNG output: ", path)
+  updated <- FALSE
+  for (attempt in seq_len(3L)) {
+    updated <- isTRUE(file.copy(temporary_path, path, overwrite = TRUE))
+    if (updated) break
+    Sys.sleep(0.25)
+  }
+  if (!updated) {
+    fallback_path <- file.path(
+      dirname(path),
+      paste0(tools::file_path_sans_ext(basename(path)), "_",
+             format(Sys.time(), "%Y%m%d_%H%M%S"), ".png")
+    )
+    if (!file.copy(temporary_path, fallback_path, overwrite = FALSE)) {
+      stop("Could not save PNG to the requested path or its fallback: ", path)
+    }
+    warning("PNG output is locked; saved the new image to: ", fallback_path)
+    return(invisible(fallback_path))
   }
   invisible(path)
 }
