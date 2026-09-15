@@ -169,12 +169,12 @@ make_fig3_b <- function(data, primary_2050, geodata, scenario,
         x = .data$LabelLon, y = .data$LabelLat,
         label = .data$Label, hjust = .data$LabelHjust
       ),
-      inherit.aes = FALSE, size = 2.6
+      inherit.aes = FALSE, size = 5.2
     ) +
     ggplot2::geom_text(
       data = size_legend$title,
       ggplot2::aes(x = .data$lon, y = .data$lat, label = .data$label),
-      inherit.aes = FALSE, hjust = 0, size = 2.8, fontface = "bold"
+      inherit.aes = FALSE, hjust = 0, size = 5.6, fontface = "bold"
     ) +
     ggplot2::geom_point(
       data = color_legend$items,
@@ -185,17 +185,17 @@ make_fig3_b <- function(data, primary_2050, geodata, scenario,
     ggplot2::geom_text(
       data = color_legend$items,
       ggplot2::aes(x = .data$label_lon, y = .data$lat, label = .data$label),
-      inherit.aes = FALSE, hjust = 0, size = 2.6
+      inherit.aes = FALSE, hjust = 0, size = 5.2
     ) +
     ggplot2::geom_text(
       data = color_legend$title,
       ggplot2::aes(x = .data$lon, y = .data$lat, label = .data$label),
-      inherit.aes = FALSE, hjust = 0, size = 2.8, fontface = "bold"
+      inherit.aes = FALSE, hjust = 0, size = 5.6, fontface = "bold"
     ) +
     ggplot2::scale_color_manual(
       values = transport_colors,
       limits = names(transport_colors), breaks = names(transport_colors), drop = FALSE,
-      name = "Transport"
+      name = ""
     ) +
     ggplot2::scale_fill_manual(
       values = FIG3_H2_NODE_COLORS,
@@ -208,7 +208,7 @@ make_fig3_b <- function(data, primary_2050, geodata, scenario,
     ) +
     ggplot2::scale_linewidth_continuous(
       range = c(0.15, 3), trans = "sqrt",
-      breaks = scales::breaks_pretty(n = 4), name = "Gross transport (EJ/yr)"
+      breaks = scales::breaks_pretty(n = 4), name = "Transport volume (EJ/yr)"
     ) +
     ggplot2::guides(
       color = ggplot2::guide_legend(

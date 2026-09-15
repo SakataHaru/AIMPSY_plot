@@ -34,12 +34,12 @@ make_fig3_a <- function(data, primary_2050, geodata, scenario,
   size_legend <- fig3_size_legend(
     max_value = max_total, max_radius = max_radius_mm,
     anchor_lon = -165, anchor_lat = -45,
-    direction = "vertical", title = "Generation (EJ/yr)"
+    direction = "vertical", title = "Power generation (EJ/yr)"
   )
   color_legend <- fig3_color_legend(
     categories = names(FIG3_GENERATION_COLORS),
-    anchor_lon = -125, anchor_lat = -12,
-    title = "", spacing_lat = 8
+    anchor_lon = -125, anchor_lat = -20,
+    title = "", spacing_lat = 7.2
   )
   transmission <- fig3_gross_links(primary_2050, scenario, ".*-AC_.*-AC$", geodata$nodes, "node") %>%
     dplyr::filter(.data$FlowEJ >= flow_threshold)
@@ -66,12 +66,12 @@ make_fig3_a <- function(data, primary_2050, geodata, scenario,
         x = .data$LabelLon, y = .data$LabelLat,
         label = .data$Label, hjust = .data$LabelHjust
       ),
-      inherit.aes = FALSE, size = 2.6
+      inherit.aes = FALSE, size = 5.2
     ) +
     ggplot2::geom_text(
       data = size_legend$title,
       ggplot2::aes(x = .data$lon, y = .data$lat, label = .data$label),
-      inherit.aes = FALSE, hjust = 0, size = 2.8, fontface = "bold"
+      inherit.aes = FALSE, hjust = 0, size = 5.6, fontface = "bold"
     ) +
     ggplot2::geom_point(
       data = color_legend$items,
@@ -82,12 +82,12 @@ make_fig3_a <- function(data, primary_2050, geodata, scenario,
     ggplot2::geom_text(
       data = color_legend$items,
       ggplot2::aes(x = .data$label_lon, y = .data$lat, label = .data$label),
-      inherit.aes = FALSE, hjust = 0, size = 2.6
+      inherit.aes = FALSE, hjust = 0, size = 5.2
     ) +
     ggplot2::geom_text(
       data = color_legend$title,
       ggplot2::aes(x = .data$lon, y = .data$lat, label = .data$label),
-      inherit.aes = FALSE, hjust = 0, size = 2.8, fontface = "bold"
+      inherit.aes = FALSE, hjust = 0, size = 5.6, fontface = "bold"
     ) +
     ggplot2::scale_fill_manual(
       values = FIG3_GENERATION_COLORS,
@@ -99,7 +99,7 @@ make_fig3_a <- function(data, primary_2050, geodata, scenario,
       guide = "none"
     ) +
     ggplot2::scale_linewidth_continuous(range = c(0.15, 2.8), trans = "sqrt",
-      breaks = scales::breaks_pretty(n = 4), name = "Gross transmission (EJ/yr)") +
+      breaks = scales::breaks_pretty(n = 4), name = "Transmission volume (EJ/yr)") +
     ggplot2::labs(fill = "Generation") +
     ggplot2::guides(
       fill = "none",

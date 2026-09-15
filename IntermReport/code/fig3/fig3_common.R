@@ -36,8 +36,8 @@ fig3_map_base <- function(geodata) {
       plot.background = ggplot2::element_rect(fill = "white", color = NA),
       panel.background = ggplot2::element_rect(fill = "white", color = NA),
       legend.position = "bottom", legend.direction = "horizontal",
-      legend.title = ggplot2::element_text(size = 8),
-      legend.text = ggplot2::element_text(size = 8)
+      legend.title = ggplot2::element_text(size = 16),
+      legend.text = ggplot2::element_text(size = 16)
     )
 }
 
