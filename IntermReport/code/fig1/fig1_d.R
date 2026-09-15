@@ -91,8 +91,7 @@ make_fig1_d <- function(data) {
       title = NULL,
       x = NULL,
       y = "Electricity (EJ/yr)",
-      fill = NULL,
-      caption = "Generation is positive; curtailment and system losses are negative."
+      fill = NULL
     ) +
     MyTheme +
     ggplot2::theme(

@@ -3,15 +3,15 @@
 # Structure and implementation rules: ../PLOTTING_GUIDE.md
 
 # AIM-Technology run: <root>/<scenario>/<run-date>/main
-AIMT_SCENARIO <- "softlink_Sc"
-AIMT_DATE <- "2606111707"
+AIMT_SCENARIO <- "softlink_IntermReport"
+AIMT_DATE <- "2609111525"
 AIMT_OUTPUT_ROOT <- "C:/@Research_Workplace/300_AIMPSY-with-AI/AIMPSY_plot/IntermReport/data/AIM-Tech"
   #"//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output"
 
 # PSM run: <root>/<scenario>/<region>/<run-date>/main
-PSM_SCENARIO <- "global_softlink_Sc"
+PSM_SCENARIO <- "global_softlink_IntermReport"
 PSM_REGION <- "Global"
-PSM_DATE <- "2606171718"
+PSM_DATE <- "2609121358"
 PSM_OUTPUT_ROOT <- "C:/@Research_Workplace/300_AIMPSY-with-AI/AIMPSY_plot/IntermReport/data/AIM-PSY"
   #"//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 
@@ -30,9 +30,9 @@ OUTPUT_DIRECTORY <- "../output"
 # Confirmed scenario names from the existing IntermReport code. Add further
 # scenarios only after checking the input GDX (for example, the future SYF case).
 target_scenarios <- c(
-  ELE = "NPi500",
-  H2 = "NPi500-LimCCS_bio",
-  SYF = "NPi500-ZF2050"
+  ELE = "500C-ELE",
+  H2 = "500C-H2",
+  SYF = "500C-SYF"
 )
 
 BUILD_FIGURES <- TRUE
@@ -307,64 +307,51 @@ build_fig2 <- function(
 
   fig2_a <- make_fig2_a(data)
   fig2_b <- make_fig2_b(primary_2050)
-  fig2_c <- make_fig2_c(data, primary_2050)
-  fig2_d <- make_fig2_d(primary_2050)
+  fig2_c <- make_fig2_c(primary_2050)
+  fig2_d <- make_fig2_d(data, primary_2050)
   panels <- list(a = fig2_a, b = fig2_b, c = fig2_c, d = fig2_d)
 
-  # LEGEND 
-  scenario_legend <- cowplot::get_plot_component(
-    fig2_a +
-      ggplot2::guides(
-        color = ggplot2::guide_legend(nrow = 1),
-        linetype = ggplot2::guide_legend(nrow = 1)
-      ) +
-      ggplot2::theme(
-        legend.position = "bottom",
-        legend.direction = "horizontal",
-        legend.key.size = grid::unit(3.5, "mm"),
-        legend.spacing = grid::unit(0, "mm"),
-        legend.margin = ggplot2::margin(0, 0, 0, 0)
-      ),
-    "guide-box-bottom"
-  )
-
   # FIGURE 2 LAYOUT 
-  # |       a       | b |
-  # |     scenario legend |
-  # |     c     |   d   |
-  top_row <- cowplot::plot_grid(
-    fig2_a + ggplot2::theme(legend.position = "none"),
-    fig2_b + ggplot2::theme(legend.position = "none"),
-    nrow = 1,
-    rel_widths = c(4, 1),
-    labels = c("a", "b"),
+  # |               a               |
+  # |       b       |       c       |
+  # |               d               |
+  row_a <- cowplot::plot_grid(
+    fig2_a,
+    ncol = 1,
+    labels = "a",
     label_size = 12
   )
-  bottom_row <- cowplot::plot_grid(
+  row_bc <- cowplot::plot_grid(
+    fig2_b + ggplot2::theme(legend.position = "none"),
     fig2_c + ggplot2::theme(legend.position = "none"),
-    fig2_d + ggplot2::theme(legend.position = "none"),
     nrow = 1,
-    rel_widths = c(3, 2),
-    labels = c("c", "d"),
+    rel_widths = c(1, 2.2),
+    labels = c("b", "c"),
+    label_size = 12
+  )
+  row_d <- cowplot::plot_grid(
+    fig2_d + ggplot2::theme(legend.position = "none"),
+    ncol = 1,
+    labels = "d",
     label_size = 12
   )
   fig2 <- cowplot::plot_grid(
-    top_row,
-    scenario_legend,
-    bottom_row,
+    row_a,
+    row_bc,
+    row_d,
     ncol = 1,
-    rel_heights = c(1, 0.13, 1)
+    rel_heights = c(55, 50, 85)
   )
 
   if (isTRUE(save_individual_panels)) {
-    save_png_mm(fig2_a, file.path(fig2_output_dir, "fig2_a.png"), 144, 67.5)
-    save_png_mm(fig2_b, file.path(fig2_output_dir, "fig2_b.png"), 36, 67.5)
-    save_png_mm(fig2_c, file.path(fig2_output_dir, "fig2_c.png"), 108, 67.5)
-    save_png_mm(fig2_d, file.path(fig2_output_dir, "fig2_d.png"), 72, 67.5)
+    save_png_mm(fig2_a, file.path(fig2_output_dir, "fig2_a.png"), 174, 55)
+    save_png_mm(fig2_b, file.path(fig2_output_dir, "fig2_b.png"), 54, 50)
+    save_png_mm(fig2_c, file.path(fig2_output_dir, "fig2_c.png"), 120, 50)
+    save_png_mm(fig2_d, file.path(fig2_output_dir, "fig2_d.png"), 174, 85)
   }
 
   if (isTRUE(save_final_figure)) {
-    save_png_mm(fig2, file.path(fig2_output_dir, "fig2.png"), 174, 174)
+    save_png_mm(fig2, file.path(fig2_output_dir, "fig2.png"), 174, 190)
   }
 
   invisible(list(panels = panels, figure = fig2))

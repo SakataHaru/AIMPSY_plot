@@ -1,20 +1,18 @@
 # FIGURE 3 SHARED MAP GEOMETRY ------------------------------------------------
 # The coordinate sources and undirected gross-flow treatment follow
-# master/code/ALLPLOT_TRADING.R. Straight lines are network schematics, not
+# master/code/ALLPLOT_TRADING.R. Transport lines are network schematics, not
 # geographic routes. NH3/SYF links use R31 representative coordinates.
 
 FIG3_GENERATION_COLORS <- c(
   "Solar" = "lightsalmon", "Wind" = "lightskyblue3",
-  "Hydro" = "lightsteelblue", "Nuclear" = "moccasin",
-  "Biomass" = "#A9D65D", "Thermal / other" = "grey65"
+  "Biomass" = "#A9D65D", "Nuclear" = "moccasin",
+  "Hydro" = "#2C7FB8", "Other" = "grey65"
 )
 
 FIG3_H2_NODE_COLORS <- c(
-  "Electrolysis" = unname(CARRIER_COLORS[["Hydrogen"]]),
-  "NH3 cracking" = unname(CARRIER_COLORS[["Ammonia"]]),
-  "Direct / other H2 use" = "#8E5EA2",
-  "NH3 synthesis" = unname(CARRIER_COLORS[["Ammonia"]]),
-  "Synfuel synthesis" = unname(CARRIER_COLORS[["Synfuel"]])
+  "Direct H2" = "thistle3",
+  "NH3" = "#8E5EA2",
+  "Synfuel" = unname(CARRIER_COLORS[["Synfuel"]])
 )
 
 fig3_detailed_iamc_rows <- function(dataset, geodata) {
@@ -31,7 +29,7 @@ fig3_link_node <- function(node) {
 
 fig3_map_base <- function(geodata) {
   ggplot2::ggplot() +
-    ggplot2::geom_sf(data = geodata$basemap, fill = "grey97", color = "grey85", linewidth = 0.16) +
+    ggplot2::geom_sf(data = geodata$basemap, fill = "grey97", color = "grey65", linewidth = 0.22) +
     ggplot2::coord_sf(xlim = c(-180, 180), ylim = c(-60, 85), expand = FALSE) +
     ggplot2::theme_void(base_size = 10) +
     ggplot2::theme(
@@ -39,13 +37,13 @@ fig3_map_base <- function(geodata) {
       panel.background = ggplot2::element_rect(fill = "white", color = NA),
       legend.position = "bottom", legend.direction = "horizontal",
       legend.title = ggplot2::element_text(size = 8),
-      legend.text = ggplot2::element_text(size = 8),
-      plot.caption = ggplot2::element_text(size = 7, hjust = 0)
+      legend.text = ggplot2::element_text(size = 8)
     )
 }
 
 fig3_gross_links <- function(primary, scenario, pattern, coordinates,
-                             coordinate_kind = c("node", "region")) {
+                             coordinate_kind = c("node", "region"),
+                             drop_dateline_crossing = TRUE) {
   coordinate_kind <- match.arg(coordinate_kind)
   symbol_rows <- dplyr::bind_rows(primary$psm_vff_l, primary$psm_vfb_l) %>%
     dplyr::filter(.data$Scenario == scenario, grepl(pattern, .data$Link), .data$Value > 0)
@@ -86,12 +84,61 @@ fig3_gross_links <- function(primary, scenario, pattern, coordinates,
     key <- "Region"
   }
   lookup <- coordinates[!duplicated(coordinates[[key]]), ]
-  links %>%
+  links <- links %>%
     dplyr::mutate(
       lon0 = lookup$lon[match(.data$Point0, lookup[[key]])],
       lat0 = lookup$lat[match(.data$Point0, lookup[[key]])],
       lon1 = lookup$lon[match(.data$Point1, lookup[[key]])],
       lat1 = lookup$lat[match(.data$Point1, lookup[[key]])]
+    ) %>%
+    dplyr::filter(
+      is.finite(.data$lon0), is.finite(.data$lat0),
+      is.finite(.data$lon1), is.finite(.data$lat1)
+    )
+  if (isTRUE(drop_dateline_crossing)) {
+    links <- links %>% dplyr::filter(abs(.data$lon1 - .data$lon0) <= 180)
+  }
+  links
+}
+
+fig3_directional_trade_links <- function(primary, scenario, pattern, coordinates) {
+  directional_rows <- function(dataset, direction) {
+    dataset %>%
+      dplyr::filter(
+        .data$Scenario == scenario,
+        grepl(pattern, .data$Link),
+        .data$Value > 0
+      ) %>%
+      split_primary_links() %>%
+      dplyr::transmute(
+        OriginNode = if (direction == "forward") .data$Node0 else .data$Node1,
+        DestinationNode = if (direction == "forward") .data$Node1 else .data$Node0,
+        FlowEJ = .data$Value
+      )
+  }
+
+  links <- dplyr::bind_rows(
+    directional_rows(primary$psm_vff_l, "forward"),
+    directional_rows(primary$psm_vfb_l, "backward")
+  )
+  if (nrow(links) == 0L) return(tibble::tibble(
+    Origin = character(), Destination = character(), FlowEJ = numeric(),
+    lon0 = numeric(), lat0 = numeric(), lon1 = numeric(), lat1 = numeric()
+  ))
+
+  lookup <- coordinates[!duplicated(coordinates$Region), ]
+  links %>%
+    dplyr::mutate(
+      Origin = sub("^R31-([A-Z0-9]+)-.*$", "\\1", .data$OriginNode),
+      Destination = sub("^R31-([A-Z0-9]+)-.*$", "\\1", .data$DestinationNode)
+    ) %>%
+    dplyr::group_by(.data$Origin, .data$Destination) %>%
+    dplyr::summarise(FlowEJ = sum(.data$FlowEJ), .groups = "drop") %>%
+    dplyr::mutate(
+      lon0 = lookup$lon[match(.data$Origin, lookup$Region)],
+      lat0 = lookup$lat[match(.data$Origin, lookup$Region)],
+      lon1 = lookup$lon[match(.data$Destination, lookup$Region)],
+      lat1 = lookup$lat[match(.data$Destination, lookup$Region)]
     ) %>%
     dplyr::filter(
       is.finite(.data$lon0), is.finite(.data$lat0),
@@ -102,10 +149,13 @@ fig3_gross_links <- function(primary, scenario, pattern, coordinates,
 
 fig3_sector_polygons <- function(values, max_value, max_radius = 5) {
   if (nrow(values) == 0L) return(tibble::tibble())
+  if (!"Order" %in% names(values)) {
+    values$Order <- match(values$Category, unique(values$Category))
+  }
   values <- values %>%
     dplyr::filter(.data$Value > 0, is.finite(.data$lon), is.finite(.data$lat)) %>%
     dplyr::group_by(.data$Region, .data$Half) %>%
-    dplyr::arrange(.data$Category, .by_group = TRUE) %>%
+    dplyr::arrange(.data$Order, .by_group = TRUE) %>%
     dplyr::mutate(
       HalfTotal = sum(.data$Value),
       AngleStart = dplyr::lag(cumsum(.data$Value), default = 0) / .data$HalfTotal,
@@ -115,7 +165,8 @@ fig3_sector_polygons <- function(values, max_value, max_radius = 5) {
     z <- values[i, ]
     radius <- max_radius * sqrt(z$HalfTotal / max_value)
     theta <- if (z$Half == "full") {
-      2 * pi * seq(z$AngleStart, z$AngleEnd, length.out = 32)
+      # Start at 12 o'clock and proceed clockwise.
+      pi / 2 - 2 * pi * seq(z$AngleStart, z$AngleEnd, length.out = 32)
     } else if (z$Half == "upper") {
       pi * seq(z$AngleStart, z$AngleEnd, length.out = 24)
     } else {
@@ -129,4 +180,149 @@ fig3_sector_polygons <- function(values, max_value, max_radius = 5) {
       lat = c(z$lat, z$lat + radius * sin(theta), z$lat)
     )
   }))
+}
+
+GeomFig3Pie <- ggplot2::ggproto(
+  "GeomFig3Pie", ggplot2::Geom,
+  required_aes = c("x", "y", "weight", "fill", "group", "slice_order"),
+  default_aes = ggplot2::aes(colour = "white", linewidth = 0.12, alpha = 1),
+  draw_key = ggplot2::draw_key_polygon,
+  draw_panel = function(data, panel_params, coord, max_value, max_radius_mm,
+                        na.rm = FALSE) {
+    coords <- coord$transform(data, panel_params)
+    pies <- lapply(split(coords, coords$group), function(z) {
+      z <- z[order(z$slice_order), , drop = FALSE]
+      total <- sum(z$weight, na.rm = TRUE)
+      if (!is.finite(total) || total <= 0) return(grid::nullGrob())
+      radius_mm <- max_radius_mm * sqrt(total / max_value)
+      fraction_end <- cumsum(z$weight) / total
+      fraction_start <- c(0, head(fraction_end, -1))
+      slices <- lapply(seq_len(nrow(z)), function(i) {
+        theta <- pi / 2 - 2 * pi * seq(
+          fraction_start[i], fraction_end[i], length.out = 48
+        )
+        grid::polygonGrob(
+          x = grid::unit(c(0.5, 0.5 + 0.5 * cos(theta), 0.5), "npc"),
+          y = grid::unit(c(0.5, 0.5 + 0.5 * sin(theta), 0.5), "npc"),
+          gp = grid::gpar(
+            fill = scales::alpha(z$fill[i], z$alpha[i]),
+            col = z$colour[i],
+            lwd = max(z$linewidth[i], 0.08) * 72.27 / 25.4
+          )
+        )
+      })
+      grid::grobTree(
+        children = do.call(grid::gList, slices),
+        vp = grid::viewport(
+          x = grid::unit(z$x[1], "npc"),
+          y = grid::unit(z$y[1], "npc"),
+          width = grid::unit(2 * radius_mm, "mm"),
+          height = grid::unit(2 * radius_mm, "mm")
+        )
+      )
+    })
+    grid::grobTree(children = do.call(grid::gList, pies))
+  }
+)
+
+fig3_pie_layer <- function(values, max_value, max_radius_mm) {
+  ggplot2::layer(
+    data = values,
+    mapping = ggplot2::aes(
+      x = .data$lon, y = .data$lat,
+      weight = .data$Value, fill = .data$Category,
+      group = .data$Region, slice_order = .data$Order
+    ),
+    stat = "identity",
+    geom = GeomFig3Pie,
+    position = "identity",
+    inherit.aes = FALSE,
+    params = list(
+      max_value = max_value,
+      max_radius_mm = max_radius_mm,
+      na.rm = TRUE
+    )
+  )
+}
+
+fig3_color_legend <- function(categories, anchor_lon, anchor_lat, title,
+                              spacing_lat = 8) {
+  items <- tibble::tibble(
+    Category = factor(categories, levels = categories),
+    lon = anchor_lon,
+    lat = anchor_lat - spacing_lat * (seq_along(categories) - 1),
+    label_lon = anchor_lon + 4,
+    label = categories
+  )
+  list(
+    items = items,
+    title = tibble::tibble(
+      lon = anchor_lon,
+      lat = anchor_lat + spacing_lat,
+      label = title
+    )
+  )
+}
+
+fig3_size_legend <- function(max_value, max_radius, anchor_lon, anchor_lat,
+                             direction = c("vertical", "horizontal"), title,
+                             n_breaks = 3) {
+  direction <- match.arg(direction)
+  if (!is.finite(max_value) || max_value <= 0) {
+    stop("Fig. 3 size legend requires a positive finite maximum value.")
+  }
+  breaks <- scales::breaks_pretty(n = n_breaks)(c(0, max_value))
+  breaks <- unique(breaks[is.finite(breaks) & breaks > 0 & breaks <= max_value])
+  if (length(breaks) == 0L) breaks <- max_value
+  if (length(breaks) > n_breaks) {
+    breaks <- breaks[unique(round(seq(1, length(breaks), length.out = n_breaks)))]
+  }
+
+  max_lon_radius <- max_radius / max(cos(anchor_lat * pi / 180), 0.35)
+  if (direction == "vertical") {
+    centers_lon <- rep(anchor_lon, length(breaks))
+    centers_lat <- anchor_lat + seq(0, by = 2 * max_radius + 4, length.out = length(breaks))
+    label_lon <- centers_lon + max_lon_radius + 3
+    label_lat <- centers_lat
+    label_hjust <- 0
+    title_lon <- anchor_lon
+    title_lat <- max(centers_lat) + max_radius + 4
+  } else {
+    centers_lon <- anchor_lon + seq(0, by = 2 * max_lon_radius + 5, length.out = length(breaks))
+    centers_lat <- rep(anchor_lat, length(breaks))
+    label_lon <- centers_lon
+    label_lat <- centers_lat
+    label_hjust <- 0.5
+    title_lon <- mean(centers_lon)
+    title_lat <- anchor_lat + max_radius + 5
+  }
+
+  centers <- tibble::tibble(
+    Value = breaks,
+    CenterLon = centers_lon,
+    CenterLat = centers_lat,
+    LabelLon = label_lon,
+    LabelLat = label_lat,
+    LabelHjust = label_hjust,
+    Label = scales::label_number(accuracy = 0.1, trim = TRUE)(breaks)
+  )
+  polygons <- dplyr::bind_rows(lapply(seq_len(nrow(centers)), function(i) {
+    z <- centers[i, ]
+    radius <- max_radius * sqrt(z$Value / max_value)
+    theta <- seq(0, 2 * pi, length.out = 80)
+    lon_scale <- max(cos(z$CenterLat * pi / 180), 0.35)
+    tibble::tibble(
+      Value = z$Value,
+      Group = paste0("size_", i),
+      lon = z$CenterLon + radius * cos(theta) / lon_scale,
+      lat = z$CenterLat + radius * sin(theta)
+    )
+  }))
+
+  list(
+    polygons = polygons,
+    labels = centers,
+    title = tibble::tibble(lon = title_lon, lat = title_lat, label = title),
+    values = breaks
+  )
 }

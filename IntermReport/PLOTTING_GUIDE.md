@@ -44,7 +44,8 @@ IntermReport/
 
 `data/` は重いローカル入力を置く可能性があるため、ディレクトリ全体を `.gitignore` でGit管理外としている。
 
-Fig.2はa–dの4 panelで構成する。b–dは2050年primary GDXを共有し、設備容量、carrier転換、地域間輸送を表示する。
+Fig.2はa–dの4 panelで構成する。aは設備容量、bは送電容量、cはcarrier地域間輸送、dは
+carrier転換フローを表示する。b–dは2050年primary GDXを共有する。
 
 ## 3. ファイルごとの責任
 
@@ -138,6 +139,7 @@ scenario色の現在値は暫定値である。
 - SYF: blue
 
 正式な論文用色コードが決まったら `SCENARIO_COLORS` を更新する。technologyとcarrierの色は、名称が確定してから `TECHNOLOGY_COLORS` と `CARRIER_COLORS` にnamed vectorとして追加する。
+scenarioの点形状は`SCENARIO_SHAPES`で管理し、ELEを三角、H2を丸、SYFを四角とする。
 
 既存の `dataframe.R` は削除せず、`load_variable_specs()` でisolated environmentへ読み込む。panelからは、たとえば次のように参照する。
 
@@ -171,9 +173,10 @@ panel固有の加工は関数内部に閉じる。データの出所、対象sce
 
 輸送リンクは暫定runの旧表記（`H2`、`NH3`、`SYF`）と本runの`TRD`表記
 （`H2TRD`、`NH3TRD`、`SYFTRD`）を同じcarrierへ分類する。各runにはどちらか一方だけが
-存在する前提とする。Fig.2-cはprimaryのlink activityを基準とし、model-sideの変換効率を
+存在する前提とする。Fig.2-dはprimaryのlink activityを基準とし、model-sideの変換効率を
 適用して出力とconversion lossを分ける。IAMC出力は照合に使い、現段階で分解しない水素発電等の
-収支差はOtherとして表示する。
+収支差はOtherとして表示する。conversion列のnodeは変換後carrierの色を使い、node内の文字は
+carrier名だけを表示する。Use列はnode間の余白を置かず、最終用途とOther/Lossを連続して積み上げる。
 
 Fig.1は現在a–dの4 panelとする。aは世界最終エネルギー需要をscenario facetで横並び、bは
 2050年部門別最終エネルギー需要をsector facet・scenario x軸で表示する。cは
@@ -182,13 +185,23 @@ Fig.1は現在a–dの4 panelとする。aは世界最終エネルギー需要�
 storage loss・transmission lossをscenario facetで表示する。Fig.1内のplot titleは置かず、
 小文字panel labelとfacet見出しを使う。
 
-Fig.3は2050年のPSM結果を使い、aで発電構成と送電、bで水素供給・利用とH2/NH3/Synfuel輸送を
-地図表示する。`fig3_common.R`には共通地図、node glyph、gross link集計を置く。node glyphは
-`nodes_centroid.geojson`に一致する詳細PSM地域だけを使い、IAMC内のR31集計値との二重計上を避ける。
-NH3/Synfuelの長距離輸送だけは`searoute_r31_representative.geojson`のR31代表点を使い、実航路を
-補間しない。aのcircle areaは年間発電量、bの上下半円areaはそれぞれH2 supply/use、line widthは
-primaryの`vff_l + vfb_l`から得たgross annual link throughputに比例させる。閾値は描画時だけ適用し、
-元集計は保持する。`FIG3_SCENARIO`で代表scenario、`FIG3_LAYOUT`で上下・左右配置を切り替える。
+Fig.3は2050年のPSM結果を使い、aで発電構成と送電、bで水素用途構成とH2/NH3/Synfuel輸送を
+地図表示する。`fig3_common.R`には共通地図、node glyph、gross link集計、sea-route変換を置く。
+node glyphは`nodes_centroid.geojson`に一致する詳細PSM地域だけを使い、IAMC内のR31集計値との
+二重計上を避ける。背景は同GeoJSONのpolygonを`M_R272.csv`でdissolveしたR31境界とし、国境線を
+重ねない。aのcircle areaは年間発電量、bのcircle areaは総H2利用量、bのsliceはDirect H2・NH3・
+Synfuelへの用途配分を表す。NH3/Synfuel輸送はR31代表点を結ぶデフォルメ曲線とし、同じ接続では
+正負のcurvatureを使って2本を分離する。H2は詳細networkの実線とする。line widthはprimaryの
+`vff_l + vfb_l`から得たgross annual link throughputに比例させる。閾値は描画時だけ適用し、元集計は
+保持する。`FIG3_SCENARIO`で代表scenario、`FIG3_LAYOUT`で上下・左右配置を切り替える。
+NH3/Synfuelでは`vff_l`を始点から終点、`vfb_l`を終点から始点として方向別に集計し、曲線終端に
+矢印を付ける。H2 networkは矢印なしのgross link throughputとする。
+Fig.3のcircle sliceは12時位置から時計回りに描く。aはSolar、Wind、Biomass、Nuclear、Hydro、
+Other、bはDirect H2、NH3、Synfuelの順とする。bではR31代表貿易拠点を白丸で重ねる。
+circle areaはdevice上の物理mm寸法で描き、緯度や地図の縦横比に関係なく真円を維持する。サイズ凡例
+も同じ面積比例式を使い、a・bとも南米西側へ置く。その右側にnodeの色凡例を縦1列で配置し、
+transmission/transportの色・矢印・太さの凡例はアフリカ南側へ横一列で配置する。地図外の凡例用余白は
+設けず、Fig.3のpanel captionは表示しない。
 
 ## 4. 物理サイズの管理
 
@@ -217,12 +230,14 @@ save_png_mm(fig1, file.path(fig1_output_dir, "fig1.png"), 174, 187.5)
 |              d | electricity legend  |
 ```
 
-Fig.2は上段をa:b = 4:1、下段をc:d = 3:2とし、段間に共通凡例を置く。
+Fig.2は3段構成とし、上段全面を設備容量a、中段を送電容量bとcarrier輸送c、下段全面を
+転換フローdとする。転換フローを最も高く、設備容量を従来より低く割り当てる。Fig.2-aは
+PSMの設備容量をTWで表示し、電解槽capacity factorは表示しない。aのscenario凡例はaの下部に置く。
 
 ```text
-|       a       | b |
-|     scenario legend |
-|     c     |   d   |
+|               a               |
+|       b       |       c       |
+|               d               |
 ```
 
 Fig.3は地図の可読性を優先し、当面は通常の論文サイズ制限を適用しない。defaultは300 × 270 mmの
@@ -232,22 +247,12 @@ panel labelは小文字の`a`、`b`を結合時に付ける。
 凡例は、凡例を持つplotから `cowplot::get_plot_component()` で位置を指定して抽出する。抽出時に `legend.position`、`legend.direction`、`legend.key.size`、`legend.spacing`、`guides()`を設定する。panel grid内では元plotの凡例を `legend.position = "none"` で隠し、抽出した凡例grobsを `plot_grid()` の独立要素として配置する。
 
 ```r
-scenario_legend <- cowplot::get_plot_component(
-  fig2_a +
-    ggplot2::guides(color = ggplot2::guide_legend(nrow = 1)) +
-    ggplot2::theme(
-      legend.position = "bottom",
-      legend.direction = "horizontal"
-    ),
-  "guide-box-bottom"
-)
-
 fig2 <- cowplot::plot_grid(
-  top_row,
-  scenario_legend,
-  bottom_row,
+  row_a,
+  row_bc,
+  row_d,
   ncol = 1,
-  rel_heights = c(1, 0.13, 1)
+  rel_heights = c(55, 50, 85)
 )
 ```
 

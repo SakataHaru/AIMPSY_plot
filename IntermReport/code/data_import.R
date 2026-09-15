@@ -180,14 +180,33 @@ load_psm_primary <- function(
 load_fig3_geodata <- function(base_data_dir) {
   node_path <- file.path(base_data_dir, "nodes_centroid.geojson")
   trade_path <- file.path(base_data_dir, "searoute_r31_representative.geojson")
-  missing <- c(node_path, trade_path)[!file.exists(c(node_path, trade_path))]
+  region_map_path <- file.path(base_data_dir, "M_R272.csv")
+  input_paths <- c(node_path, trade_path, region_map_path)
+  missing <- input_paths[!file.exists(input_paths)]
   if (length(missing)) stop("Missing Fig. 3 coordinate files: ", paste(missing, collapse = ", "))
   nodes_raw <- sf::st_read(node_path, quiet = TRUE)
   trade_raw <- sf::st_read(trade_path, quiet = TRUE)
+  region_map_raw <- utils::read.csv(region_map_path, stringsAsFactors = FALSE)
   if (!all(c("N_PSY", "centroid_x", "centroid_y") %in% names(nodes_raw)) ||
-      !all(c("R31", "Longitude", "Latitude") %in% names(trade_raw))) {
+      !all(c("R31", "Longitude", "Latitude") %in% names(trade_raw)) ||
+      !all(c("N_IND", "R31") %in% names(region_map_raw))) {
     stop("Fig. 3 coordinate files have unexpected columns.")
   }
+  region_map <- region_map_raw %>%
+    dplyr::transmute(Node = as.character(.data$N_IND), Region = as.character(.data$R31)) %>%
+    dplyr::distinct()
+  s2_state <- sf::sf_use_s2()
+  suppressMessages(sf::sf_use_s2(FALSE))
+  on.exit(suppressMessages(sf::sf_use_s2(s2_state)), add = TRUE)
+  r31_boundaries <- nodes_raw %>%
+    sf::st_make_valid() %>%
+    sf::st_transform(6933) %>%
+    dplyr::left_join(region_map, by = c("N_PSY" = "Node")) %>%
+    dplyr::filter(!is.na(.data$Region)) %>%
+    dplyr::group_by(.data$Region) %>%
+    dplyr::summarise(geometry = sf::st_union(.data$geometry), .groups = "drop") %>%
+    sf::st_make_valid() %>%
+    sf::st_transform(4326)
   list(
     nodes = nodes_raw %>% sf::st_drop_geometry() %>%
       dplyr::transmute(Node = as.character(.data$N_PSY),
@@ -195,9 +214,10 @@ load_fig3_geodata <- function(base_data_dir) {
     regions = trade_raw %>% sf::st_drop_geometry() %>%
       dplyr::transmute(Region = sub("^R31-", "", as.character(.data$R31)),
                        lon = as.numeric(.data$Longitude), lat = as.numeric(.data$Latitude)),
-    basemap = rnaturalearth::ne_countries(scale = "medium", returnclass = "sf") %>%
-      sf::st_wrap_dateline(options = c("WRAPDATELINE=YES", "DATELINEOFFSET=180")) %>%
-      sf::st_make_valid(),
-    metadata = list(node_path = node_path, trade_path = trade_path)
+    basemap = r31_boundaries,
+    metadata = list(
+      node_path = node_path, trade_path = trade_path,
+      region_map_path = region_map_path
+    )
   )
 }

@@ -50,6 +50,12 @@ SCENARIO_COLORS <- c(
   SYF = "#2C7BB6"  # blue placeholder
 )
 
+SCENARIO_SHAPES <- c(
+  ELE = 17, # triangle
+  H2 = 16,  # circle
+  SYF = 15  # square
+)
+
 CARRIER_LEVELS <- c(
   "Coal", "Liquids-fossil", "Gas-fossil", "Biomass", "Solar",
   "Electricity", "Heat", "Hydrogen", "Ammonia", "Synfuel"
@@ -63,7 +69,7 @@ CARRIER_COLORS <- c(
   "Electricity" = "lightsteelblue",
   "Heat" = "salmon",
   "Hydrogen" = "thistle2",
-  "Ammonia" = "plum3",
+  "Ammonia" = "mediumpurple3",
   "Synfuel" = "mediumorchid1"
 )
 
@@ -73,7 +79,7 @@ EMISSION_POWER_COLOR <- "gold"
 
 FIG2_FLOW_COLORS <- c(
   "Hydrogen" = unname(CARRIER_COLORS[["Hydrogen"]]),
-  "Ammonia" = "darkslateblue",
+  "Ammonia" = unname(CARRIER_COLORS[["Ammonia"]]),
   "Synfuel" = unname(CARRIER_COLORS[["Synfuel"]]),
   "Other" = "grey65",
   "Loss" = "grey85"
@@ -262,7 +268,7 @@ save_png_mm <- function(plot, path, width_mm, height_mm, dpi = 300, bg = "white"
   )
   updated <- FALSE
   for (attempt in seq_len(3L)) {
-    updated <- isTRUE(file.copy(temporary_path, path, overwrite = TRUE))
+    updated <- isTRUE(suppressWarnings(file.copy(temporary_path, path, overwrite = TRUE)))
     if (updated) break
     Sys.sleep(0.25)
   }
@@ -272,7 +278,7 @@ save_png_mm <- function(plot, path, width_mm, height_mm, dpi = 300, bg = "white"
       paste0(tools::file_path_sans_ext(basename(path)), "_",
              format(Sys.time(), "%Y%m%d_%H%M%S"), ".png")
     )
-    if (!file.copy(temporary_path, fallback_path, overwrite = FALSE)) {
+    if (!suppressWarnings(file.copy(temporary_path, fallback_path, overwrite = FALSE))) {
       stop("Could not save PNG to the requested path or its fallback: ", path)
     }
     warning("PNG output is locked; saved the new image to: ", fallback_path)

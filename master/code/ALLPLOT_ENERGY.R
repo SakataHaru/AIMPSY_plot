@@ -2,18 +2,18 @@
 # Edit only the values in this section when changing runs or plot contents.
 
 # PSM run: <PSM output root>/<SCENARIO>/<REGION>/<DATE>/main
-PSM_SCENARIO <- "global_softlink_Sc"
+PSM_SCENARIO <- "global_softlink_IntermReport"
 PSM_REGION <- "Global"
-PSM_DATE <- "2608031707"
+PSM_DATE <- "2609121358"
 
 timeresol <- "6HOUR"
 
 # AIM-Technology run: <AIMT output root>/<SCENARIO>/<DATE>/main
-AIMT_SCENARIO <- "softlink_Sc"
-AIMT_DATE <- "2606111707"
+AIMT_SCENARIO <- "softlink_IntermReport"
+AIMT_DATE <- "2609111525"
 
 # Use "on" to include a panel in the regional summary, or "off" to omit it.
-target_scenarios <- c("NPi500")
+target_scenarios <- c("500C-ELE", "500C-H2", "500C-SYF")
 plot_year <- 2050
 
 plot_targets <- c(
