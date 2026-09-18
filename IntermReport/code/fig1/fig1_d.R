@@ -90,7 +90,7 @@ make_fig1_d <- function(data) {
     ggplot2::labs(
       title = NULL,
       x = NULL,
-      y = "Electricity (EJ/yr)",
+      y = "Power generation (EJ/yr)",
       fill = NULL
     ) +
     MyTheme +
