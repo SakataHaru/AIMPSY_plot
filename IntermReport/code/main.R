@@ -11,8 +11,9 @@ AIMT_OUTPUT_ROOT <- "C:/@Research_Workplace/300_AIMPSY-with-AI/AIMPSY_plot/Inter
 # PSM run: <root>/<scenario>/<region>/<run-date>/main
 PSM_SCENARIO <- "global_softlink_IntermReport"
 PSM_REGION <- "Global"
-PSM_DATE <- "2609121358"
-PSM_OUTPUT_ROOT <- "C:/@Research_Workplace/300_AIMPSY-with-AI/AIMPSY_plot/IntermReport/data/AIM-PSY"
+PSM_DATE <- "2609291626"
+PSM_OUTPUT_ROOT <-   "//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
+  #"C:/@Research_Workplace/300_AIMPSY-with-AI/AIMPSY_plot/IntermReport/data/AIM-PSY"
   #"//SY_3600_01/atfs02/Individual/hsakata/AIMPSY/output"
 
 # Primary-GDX timeslice duration used to annualize vff_l and vfb_l.
@@ -49,6 +50,9 @@ FIG3_POWER_FLOW_THRESHOLD <- 0.01
 FIG3_H2_FLOW_THRESHOLD <- 0.01
 FIG3_NH3_FLOW_THRESHOLD <- 0.01
 FIG3_SYF_FLOW_THRESHOLD <- 0.01
+FIG3_BIO_FLOW_THRESHOLD <- 0.01
+BUILD_FIG3_BIO_AIMTECH <- TRUE
+AIMT_BIOMASS_RUN_DIR <- "//SY_3600_01/atfs02/Individual/hsakata/AIMEnduse/output/softlink_IntermReport/2609111525"
 
 
 # PACKAGES AND SCRIPT LOCATION ------------------------------------------------
@@ -108,7 +112,9 @@ panel_files <- c(
   "fig2/fig2_d.R",
   "fig3/fig3_common.R",
   "fig3/fig3_a.R",
-  "fig3/fig3_b.R"
+  "fig3/fig3_b.R",
+  "fig3/fig3_bio.R",
+  "fig3/fig3_bio_AIMtech.R"
 )
 invisible(lapply(file.path(code_dir, panel_files), source))
 
@@ -359,7 +365,7 @@ build_fig2 <- function(
 
 # FIGURE 3 -----------------------------------------------------------
 build_fig3 <- function(
-  data, primary_2050, geodata, scenario, output_dir,
+  data, primary_2050, geodata, scenario, output_dir, aimt_biomass = NULL,
   save_individual_panels = FALSE, save_final_figure = FALSE
 ) {
   fig3_output_dir <- file.path(output_dir, "fig3")
@@ -373,6 +379,13 @@ build_fig3 <- function(
     FIG3_NODE_THRESHOLD, FIG3_H2_FLOW_THRESHOLD,
     FIG3_NH3_FLOW_THRESHOLD, FIG3_SYF_FLOW_THRESHOLD
   )
+  fig3_bio <- make_fig3_bio(
+    data, primary_2050, geodata, scenario,
+    FIG3_NODE_THRESHOLD, FIG3_BIO_FLOW_THRESHOLD
+  )
+  fig3_bio_AIMtech <- if (!is.null(aimt_biomass)) make_fig3_bio_AIMtech(
+    aimt_biomass, geodata, scenario, FIG3_NODE_THRESHOLD, FIG3_BIO_FLOW_THRESHOLD
+  ) else NULL
   # Size restrictions are intentionally not applied to the first Fig. 3 map.
   # Vertical is the readable default; horizontal remains available for review.
   if (FIG3_LAYOUT == "vertical") {
@@ -391,6 +404,10 @@ build_fig3 <- function(
   if (isTRUE(save_individual_panels)) {
     save_png_mm(fig3_a, file.path(fig3_output_dir, "fig3_a.png"), 300, 135)
     save_png_mm(fig3_b, file.path(fig3_output_dir, "fig3_b.png"), 300, 135)
+    save_png_mm(fig3_bio, file.path(fig3_output_dir, "fig3_bio.png"), 300, 135)
+    if (!is.null(fig3_bio_AIMtech)) {
+      save_png_mm(fig3_bio_AIMtech, file.path(fig3_output_dir, "fig3_bio_AIMtech.png"), 300, 135)
+    }
   }
   if (isTRUE(save_final_figure)) {
     save_png_mm(
@@ -398,7 +415,7 @@ build_fig3 <- function(
       final_size_mm[["width"]], final_size_mm[["height"]]
     )
   }
-  invisible(list(panels = list(a = fig3_a, b = fig3_b), figure = fig3))
+  invisible(list(panels = list(a = fig3_a, b = fig3_b, bio = fig3_bio, bio_AIMtech = fig3_bio_AIMtech), figure = fig3))
 }
 
 
@@ -457,9 +474,15 @@ if (isTRUE(BUILD_FIGURES)) {
   }
   if (isTRUE(BUILD_FIG3)) {
     fig3_geodata <- load_fig3_geodata(file.path(project_dir, "data"))
+    aimt_biomass <- if (isTRUE(BUILD_FIG3_BIO_AIMTECH)) load_aimt_biomass_data(
+      primary_gdx = file.path(AIMT_BIOMASS_RUN_DIR, "gams_output", "gdx_primary",
+                              fig3_model_scenario, "2050.gdx"),
+      trade_gdx = file.path(AIMT_BIOMASS_RUN_DIR, "gams_output", "gdx_merged", "trade_merged.gdx"),
+      scenario = fig3_model_scenario, year = 2050, gams_system_dir = GAMS_SYSTEM_DIR
+    ) else NULL
     figure_results$fig3 <- build_fig3(
       data = data, primary_2050 = primary_2050, geodata = fig3_geodata,
-      scenario = fig3_model_scenario, output_dir = output_dir,
+      scenario = fig3_model_scenario, output_dir = output_dir, aimt_biomass = aimt_biomass,
       save_individual_panels = SAVE_INDIVIDUAL_PANELS,
       save_final_figure = SAVE_FINAL_FIGURES
     )

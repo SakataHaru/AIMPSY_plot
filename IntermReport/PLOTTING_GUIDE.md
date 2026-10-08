@@ -118,7 +118,7 @@ data <- list(
 Figure固有の `filter()`、`group_by()`、`summarise()`、地域集約、scenario選択、年選択、単位変換はここへ置かない。
 
 Fig.2-b–dとFig.3のprimary GDXは `load_psm_primary()` で必要になった時点で一度だけ読む。年別GDXから
-`vfs_l`、`vff_l`、`vfb_l`だけを読み、リンク単位まで直ちに集約してpanel previewとcombined
+`vfs_l`、`vff_l`、`vfb_l`とバイオマス上限用の`pmax(ME,MK)`を読み、リンク単位まで直ちに集約してpanel previewとcombined
 Figureで共有する。`vfs_l`はGWの年次設備容量として時間重みを掛けない。`vff_l`と`vfb_l`は
 `time_resol`に対応する時間数を掛け、`3.6e-6`でGWhからEJへ変換する。
 
@@ -332,3 +332,25 @@ GDXが存在する、scriptが終了する、画像が描画される、とい�
 ## 10. このガイドの更新
 
 panel構成、共通データ契約、物理サイズ管理、保存方法を変更した場合は、コードと同じ作業でこの文書も更新する。コードと文書が食い違う場合は、実行コードと入力artifactを確認し、推測で文書を補完しない。
+
+## 11. バイオマス貿易図（fig3_bio）
+
+`code/fig3/fig3_bio.R` は `fig3_b.R` をコピーして作成した追加panelである。
+`main.R` の `build_fig3()` はこのpanelも返し、個別保存が有効な場合に
+`output/fig3/fig3_bio.png`（300 × 135 mm）を保存する。
+
+- 矢印は固体バイオマス（CRN/CRNTRD、緑）と液体バイオマス（BMS/BMSTRD、濃緑）。方向別年間流量を既存helperで集計する。描画閾値は `FIG3_BIO_FLOW_THRESHOLD`。
+- 黄緑の円の面積はR31地域別の国内バイオマス利用可能量（EJ/yr）に比例する。用途内訳は分割しない。
+- `load_psm_primary()` は年別primary GDXの `pmax(ME,MK)` を追加で読み、TWh/yrからEJ/yrへ0.0036を掛けて `psm_biomass_limits` に格納する。時間重みは掛けない。
+- 国内資源上限は `R_CRNAGR/FRR/MAN/MSW`、`R_CRNP01`～`R_CRNP08`、`R_CRN1ST` の合計。輸入上限を含めない。`CRNALL` が存在する場合は総量制約も適用する。
+- モデル側 `data/parameter/enesup.gms` のAIM-Technology利用量（`Prm_Ene_Bio_Ele + Prm_Ene_Bio_Hyd`）由来の総量上限は `tech_bio=aimtR31` の場合に設定される。利用実績を上限とみなさず、実際のprimary GDXの制約値を使う。
+- 2026-09-29確認対象の `500C-H2/2050.gdx` には `CRNALL` が存在しないため、円には資源別供給上限の合計を使った。
+## 12. AIM-Technology版バイオマス図
+
+`code/fig3/fig3_bio_AIMtech.R` は `fig3_bio.R` の描画体系をコピーし、入力だけをAIM-Technologyへ変更したpanelである。`BUILD_FIG3_BIO_AIMTECH` を有効にすると、`main.R` が `AIMT_BIOMASS_RUN_DIR` の同一runから以下を読み込み、個別保存が有効な場合に `output/fig3/fig3_bio_AIMtech.png`（300 × 135 mm）を保存する。
+
+- ポテンシャル: `gams_output/gdx_primary/<scenario>/2050.gdx` の `emax(ME,MK)`。国内資源13種（CRNAGR/FRR/MAN/MSW、CRNP01～08、CRN1ST）の合計。PJ/yrを1000で割りEJ/yrへ変換する。世界集計WORと地図外のdummy地域は円に含めない。
+- 貿易: `gams_output/gdx_merged/trade_merged.gdx` の `trade_merged(Sc,K_EXP,Sr,Sr,Y5)`。SrからSr.1への方向別流量、CRNR2=固体、CRNR1=液体。既にEJ/yrなので時間重みや追加単位変換はしない。
+- 対象scenarioはFIG3_SCENARIO、対象年は2050。緑系の矢印、黄緑の円、面積と線幅のスケール、曲率、凡例位置はPSM版から継承する。
+- emaxのゼロレコードが省略される地域のCRN1STは0で補完する。それ以外の12種の地域別資源上限は存在を検証する。
+- 描画時はPSM版と同じ0.01 EJ/yr閾値と日付変更線フィルターを使うため、図の矢印合計は全貿易量とは異なる。

@@ -4,7 +4,7 @@
 # PSM run: <PSM output root>/<SCENARIO>/<REGION>/<DATE>/main
 PSM_SCENARIO <- "global_softlink_IntermReport"
 PSM_REGION <- "Global"
-PSM_DATE <- "2609121358"
+PSM_DATE <- "2609291626"
 
 timeresol <- "6HOUR"
 
