@@ -6,16 +6,20 @@ repo <- dirname(dirname(base)); ref <- file.path(repo,'IntermReport/code')
 out <- file.path(base,'output'); dir.create(out, recursive=TRUE, showWarnings=FALSE)
 source(file.path(ref,'plot_common.R')); source(file.path(ref,'data_import.R'))
 source(file.path(base,'code/fig3_common.R'))
-scenarios <- c('500C','500C-NH3_R272'); sm <- setNames(scenarios,scenarios)
+source(file.path(base,'code/transport.R'))
+scenarios <- c('500C','500C-NH3_R272','500C-NH3_R272_ROAD'); sm <- setNames(scenarios,scenarios)
+panel_scale <- length(scenarios)/2
 igdx('C:/GAMS/win64/26.1')
 iamc <- read_iamc_gdx(file.path(base,'data/main'),'PSM') %>% filter(Scenario %in% scenarios)
+missing_scenarios <- setdiff(scenarios,unique(iamc$Scenario[iamc$Region=='CHN' & iamc$Year==2040]))
+if(length(missing_scenarios)) stop('Missing China 2040 IAMC scenarios: ',paste(missing_scenarios,collapse=', '))
 source(file.path(base,'code/generation.R'))
 source(file.path(base,'code/fig1_d.R'))
 source(file.path(base,'code/fig2_d.R'))
 save_generation <- function() {
  save_png_mm(make_china_generation(iamc,sm,ref),
              file.path(out,'generation_mix_CHN_2020_2040.png'),
-             width_mm=355.6,height_mm=152.4,dpi=240)
+             width_mm=355.6*panel_scale,height_mm=152.4,dpi=240)
 }
 if ('--generation-only' %in% commandArgs(trailingOnly=TRUE)) {
  save_generation()
@@ -31,6 +35,7 @@ primary <- list(psm_vfs_l=tibble(),psm_vff_l=tibble(),psm_vfb_l=tibble(),
 demands <- list(); weights <- list()
 for (s in scenarios) {
  path <- file.path(base,'data/gdx_primary',s,'2040.gdx')
+ if(!file.exists(path)) stop('Missing primary GDX: ',path)
  fw <- rgdx.param(path,'vff_l'); bw <- rgdx.param(path,'vfb_l')
  times <- unique(as.character(fw$T)); nt <- sum(grepl('^d[0-9]+t[0-9]+$',times))
  # Standard full-year hourly blocks: 365 days x 4 blocks => 6 hours/block.
@@ -74,7 +79,7 @@ PSM_WORLD_REGIONS <- 'CHN'
 sankey <- make_fig2_d(data,primary)+labs(title='China: hydrogen conversion and use, 2040',
  subtitle='Final use: primary model demand; conversion flows: input energy basis',y='Energy flow (EJ/yr)')+
  theme(legend.position='bottom',strip.text=element_text(size=11),axis.title.y=element_text(size=10))
-saveplot(sankey,'hydrogen_conversion_CHN_2040',14,7)
+saveplot(sankey,'hydrogen_conversion_CHN_2040',14*panel_scale,7)
 # Node generation follows Fig. 3-a's category aggregation.
 gspec <- spec %>% mutate(Category=ifelse(Category %in% c('Coal','Gas','Oil','Geothermal','Hydrogen','Gas/H2 co-firing'),'Other',Category))
 gn <- iamc %>% filter(Year==2040,Region %in% nodes) %>% inner_join(gspec %>% select(Variable,Category),by='Variable') %>%
@@ -106,6 +111,9 @@ fuel_flows <- bind_rows(lapply(scenarios,function(s) bind_rows(lapply(names(fuel
   filter(Point0!=Point1,FlowEJ>=0.01) %>% mutate(Scenario=s,Carrier=carrier)
 }))))
 print(fuel_flows %>% group_by(Scenario,Carrier) %>% summarise(Links=n(),GrossFlowEJ=sum(FlowEJ),.groups='drop'))
+fuel_paths <- make_carrier_transport_paths(fuel_flows,names(fuel_patterns))
+message('Shared carrier corridors: ',nrow(attr(fuel_paths,'shared_corridors')),
+        '; separated perpendicular to each corridor (node positions unchanged)')
 map_pair <- function(vals,colors,title,name,transmission=FALSE,fuel_transport=FALSE) {
  vals <- vals %>% left_join(geo$nodes,by=c('Region'='Node')) %>% mutate(Order=match(Category,names(colors)))
  maxval <- max(vals %>% group_by(Scenario,Region) %>% summarise(Total=sum(Value),.groups='drop') %>% pull(Total))
@@ -117,14 +125,16 @@ map_pair <- function(vals,colors,title,name,transmission=FALSE,fuel_transport=FA
    aes(x=lon0,y=lat0,xend=lon1,yend=lat1,linewidth=FlowEJ),curvature=.08,color='grey30',alpha=.5)+
    scale_linewidth_continuous(limits=c(0,maxflow),range=c(.15,2.5),trans='sqrt',name='Gross transmission (EJ/yr)')
   if(fuel_transport && nrow(fuel_flows)>0) {
-   links <- filter(fuel_flows,Scenario==s)
+   links <- filter(fuel_paths,Scenario==s)
    transport_colors <- c(H2=unname(FIG3_H2_NODE_COLORS[['Direct H2']]),
                          NH3=unname(FIG3_H2_NODE_COLORS[['NH3']]),Synfuel=unname(CARRIER_COLORS[['Synfuel']]))
-   p <- p+geom_curve(data=links,aes(x=lon0,y=lat0,xend=lon1,yend=lat1),
-                    curvature=.08,color='white',linewidth=1,show.legend=FALSE)+
-    geom_curve(data=links,aes(x=lon0,y=lat0,xend=lon1,yend=lat1,linewidth=FlowEJ,color=Carrier),
-               curvature=.08,alpha=.9,lineend='round')+
-    scale_color_manual(values=transport_colors,name='Transport carrier')+
+   p <- p+geom_path(data=links,aes(x=lon,y=lat,group=PathID),
+                   color='white',linewidth=1,lineend='round',show.legend=FALSE)+
+    geom_path(data=links,aes(x=lon,y=lat,group=PathID,linewidth=FlowEJ,color=Carrier),
+              alpha=.9,lineend='round')+
+    scale_color_manual(values=transport_colors,limits=names(transport_colors),drop=FALSE,
+                       labels=c(H2='H2 pipeline',NH3='NH3 transport (truck in ROAD)',Synfuel='Synfuel'),
+                       name='Transport carrier')+
     scale_linewidth_continuous(limits=c(0,max(fuel_flows$FlowEJ)),range=c(.2,2.8),trans='sqrt',
                               name='Gross transport (EJ/yr)')+
     guides(color=guide_legend(override.aes=list(linewidth=1.1),order=1,nrow=1),
@@ -137,7 +147,9 @@ map_pair <- function(vals,colors,title,name,transmission=FALSE,fuel_transport=FA
    pies+
    scale_fill_manual(values=colors,limits=names(colors),drop=FALSE,name=NULL)+
    geom_text(data=geo$nodes,aes(lon,lat,label=sub('CHN-','',Node)),nudge_y=-.8,size=2.5)+
-   labs(title=s)+theme(plot.title=element_text(hjust=.5,face='bold'),legend.position='bottom')
+   labs(title=s,caption=if(fuel_transport) 'Gross forward + backward flow; links < 0.01 EJ/yr omitted.\nShared corridors are offset for visibility; schematic routes.' else NULL)+
+   theme(plot.title=element_text(hjust=.5,face='bold'),legend.position='bottom',
+         plot.caption=element_text(size=8,hjust=.5))
   # Physical size guide uses the identical mm radius as the pie layer.
   breaks <- pretty(c(0,maxval),n=3);breaks <- breaks[breaks>0 & breaks<=maxval]
   guide <- tibble(lon=seq(78,by=10,length.out=length(breaks)),lat=19.5,Value=breaks)
@@ -148,11 +160,17 @@ map_pair <- function(vals,colors,title,name,transmission=FALSE,fuel_transport=FA
  })
  p <- plot_grid(plotlist=plots,nrow=1)
  p <- plot_grid(ggdraw()+draw_label(title,fontface='bold',size=14),p,ncol=1,rel_heights=c(.07,1))
- saveplot(p,name,16,7.5)
+ saveplot(p,name,16*panel_scale,7.5)
 }
 map_pair(gn,FIG3_GENERATION_COLORS,'China: node generation and electricity transmission, 2040','node_generation_transmission_CHN_2040',TRUE)
 map_pair(hn,FIG3_H2_NODE_COLORS,'China: hydrogen allocation and carrier transport, 2040 (pies: H2 input basis)','node_hydrogen_conversion_CHN_2040',fuel_transport=TRUE)
 summary <- iamc %>% filter(Region=='CHN',Year==2040,Variable %in% c('Sec_Ene_Ele','Sec_Ene_Hyd_Ele','Sec_Ene_Hyd_Amm')) %>%
- select(Scenario,Variable,Value) %>% pivot_wider(names_from=Scenario,values_from=Value) %>%
- mutate(Difference=`500C-NH3_R272`-`500C`,Percent=100*Difference/`500C`)
-print(summary); message('Saved plots to ',out)
+ select(Scenario,Variable,Value)
+summary <- summary %>%
+ left_join(summary %>% filter(Scenario=='500C') %>% select(Variable,Baseline=Value),by='Variable') %>%
+ left_join(summary %>% filter(Scenario=='500C-NH3_R272') %>% select(Variable,WithoutTruck=Value),by='Variable') %>%
+ mutate(Difference=Value-Baseline,Percent=ifelse(Baseline==0,NA_real_,100*Difference/Baseline),
+        TruckDifference=Value-WithoutTruck,
+        TruckPercent=ifelse(WithoutTruck==0,NA_real_,100*TruckDifference/WithoutTruck),
+        Scenario=factor(Scenario,levels=scenarios)) %>% arrange(Variable,Scenario)
+print(tibble::as_tibble(summary),width=Inf); message('Saved plots to ',out)
