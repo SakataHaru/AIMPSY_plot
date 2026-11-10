@@ -4,7 +4,7 @@
 make_carrier_transport_paths <- function(flows, carrier_order = c('H2','NH3','Synfuel'),
                                          lane_spacing = 0.45, samples = 81L) {
   if (!nrow(flows)) {
-    out <- mutate(flows,lon=numeric(),lat=numeric(),PathID=character())
+    out <- mutate(flows,lon=numeric(),lat=numeric(),PathID=character(),PathPiece=character(),Step=integer())
     attr(out,'shared_corridors') <- tibble::tibble()
     return(out)
   }
@@ -14,6 +14,8 @@ make_carrier_transport_paths <- function(flows, carrier_order = c('H2','NH3','Sy
     X0 = ifelse(Swap,lon1,lon0), Y0 = ifelse(Swap,lat1,lat0),
     X1 = ifelse(Swap,lon0,lon1), Y1 = ifelse(Swap,lat0,lat1)
   ) %>%
+    # Follow the short corridor across the Pacific instead of crossing the map.
+    mutate(X1=X0+((X1-X0+180) %% 360)-180) %>%
     group_by(Scenario,Carrier,Start,End,X0,Y0,X1,Y1) %>%
     summarise(FlowEJ=sum(FlowEJ),.groups='drop')
   lanes <- links %>% distinct(Start,End,Carrier) %>%
@@ -28,9 +30,8 @@ make_carrier_transport_paths <- function(flows, carrier_order = c('H2','NH3','Sy
   paths <- bind_rows(lapply(seq_len(nrow(links)),function(i) {
     z <- links[i,]
     # Longitude compression gives a perpendicular offset even on N/S links.
-    # Spacing is in latitude-equivalent degrees (~50 km). With 8-inch panels,
-    # 0.45 keeps adjacent strokes close to touching while still distinguishable.
-    lon_scale <- cos((z$Y0+z$Y1)/2*pi/180)
+    # Lane spacing is in latitude-equivalent degrees; callers set it for map size.
+    lon_scale <- max(cos((z$Y0+z$Y1)/2*pi/180),0.25)
     dx <- (z$X1-z$X0)*lon_scale; dy <- z$Y1-z$Y0
     distance <- sqrt(dx^2+dy^2)
     if (!is.finite(distance) || distance<=0) stop('Invalid transport corridor: ',z$PathID)
@@ -42,6 +43,9 @@ make_carrier_transport_paths <- function(flows, carrier_order = c('H2','NH3','Sy
       lat=z$Y0+(z$Y1-z$Y0)*tt+shift*dx/distance
     )
   }))
+  paths <- paths %>% mutate(lon=((lon+180) %% 360)-180) %>%
+    group_by(PathID) %>% arrange(Step,.by_group=TRUE) %>%
+    mutate(PathPiece=paste0(PathID,'__',cumsum(abs(lon-lag(lon,default=first(lon)))>180))) %>% ungroup()
   attr(paths,'shared_corridors') <- lanes %>% filter(Carriers>1) %>% distinct(Start,End,Carriers)
   paths
 }

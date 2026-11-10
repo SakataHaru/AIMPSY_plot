@@ -4,7 +4,7 @@ make_fig1_d <- function(data) {
   assert_panel_data(data)
 
   scenario_lookup <- scenario_crosswalk(data)
-  years <- seq(2020, 2040, by = 5)
+  years <- seq(2020, data$metadata$year, by = 5)
   # Active ele_map.gms mappings. Coal includes coal-biomass and coal-hydrogen
   # cofiring. Gas-hydrogen cofiring is exported separately and is added to Gas.
   generation_spec <- tibble::tribble(
@@ -45,7 +45,7 @@ make_fig1_d <- function(data) {
 
   plot_data <- data$psm_iamc %>%
     dplyr::filter(
-      .data$Region == "CHN",
+      .data$Region %in% PSM_WORLD_REGIONS,
       .data$Year %in% years
     ) %>%
     dplyr::inner_join(scenario_lookup, by = "Scenario") %>%
@@ -86,7 +86,7 @@ make_fig1_d <- function(data) {
       breaks = legend_display_levels,
       drop = FALSE
     ) +
-    ggplot2::scale_x_continuous(breaks = seq(2020, 2040, by = 10)) +
+    ggplot2::scale_x_continuous(breaks = seq(2020, data$metadata$year, by = 10)) +
     ggplot2::labs(
       title = NULL,
       x = NULL,

@@ -101,7 +101,8 @@ fig3_gross_links <- function(primary, scenario, pattern, coordinates,
   links
 }
 
-fig3_directional_trade_links <- function(primary, scenario, pattern, coordinates) {
+fig3_directional_trade_links <- function(primary, scenario, pattern, coordinates,
+                                        drop_dateline_crossing = TRUE) {
   directional_rows <- function(dataset, direction) {
     dataset %>%
       dplyr::filter(
@@ -127,7 +128,7 @@ fig3_directional_trade_links <- function(primary, scenario, pattern, coordinates
   ))
 
   lookup <- coordinates[!duplicated(coordinates$Region), ]
-  links %>%
+  links <- links %>%
     dplyr::mutate(
       Origin = sub("^R31-([A-Z0-9]+)-.*$", "\\1", .data$OriginNode),
       Destination = sub("^R31-([A-Z0-9]+)-.*$", "\\1", .data$DestinationNode)
@@ -143,8 +144,12 @@ fig3_directional_trade_links <- function(primary, scenario, pattern, coordinates
     dplyr::filter(
       is.finite(.data$lon0), is.finite(.data$lat0),
       is.finite(.data$lon1), is.finite(.data$lat1),
-      abs(.data$lon1 - .data$lon0) <= 180
+      .data$Origin != .data$Destination
     )
+  if (isTRUE(drop_dateline_crossing)) {
+    links <- links %>% dplyr::filter(abs(.data$lon1 - .data$lon0) <= 180)
+  }
+  links
 }
 
 fig3_sector_polygons <- function(values, max_value, max_radius = 5) {

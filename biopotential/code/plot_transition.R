@@ -26,11 +26,15 @@ script_dir <- if (length(script_path) > 0) {
 } else {
   normalizePath(getwd(), winslash = "/", mustWork = FALSE)
 }
-project_dir <- if (file.exists(file.path(script_dir, "code", "dataframe.R"))) {
-  script_dir
-} else {
-  normalizePath(file.path(script_dir, ".."), winslash = "/", mustWork = FALSE)
-}
+project_candidates <- normalizePath(c(script_dir, file.path(script_dir, ".."),
+  file.path(script_dir, "biopotential"),
+  file.path(script_dir, "AIMPSY_plot", "biopotential")),
+  winslash = "/", mustWork = FALSE)
+project_candidates <- project_candidates[basename(project_candidates) == "biopotential" &
+  file.exists(file.path(project_candidates, "code", "dataframe.R"))]
+if (!length(project_candidates)) stop("Run from the workspace, plot repository or biopotential project.")
+project_dir <- project_candidates[[1]]
+workspace_dir <- normalizePath(file.path(project_dir, "../.."), winslash = "/", mustWork = TRUE)
 
 # DERIVED SETTINGS AND INPUT PATHS --------------------------------------------
 
@@ -53,8 +57,7 @@ psm_main_dir <- file.path(
 )
 
 base_dir <- file.path(
-  project_dir,
-  "output",
+  workspace_dir, "topics", "BiomassPotential", "analysis", "resolution_comparison", "output",
   paste(PSM_SCENARIO, PSM_DATE, comparison_name, sep = "_")
 )
 

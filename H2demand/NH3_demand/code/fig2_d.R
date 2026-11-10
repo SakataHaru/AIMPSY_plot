@@ -1,8 +1,8 @@
 # FIGURE 2D PANEL --------------------------------------------------------------
 
-make_fig2_d <- function(data, primary_2040) {
+make_fig2_d <- function(data, primary) {
   assert_panel_data(data)
-  assert_primary_data(primary_2040)
+  assert_primary_data(primary)
   scenario_lookup <- scenario_crosswalk(data)
   flow_tolerance <- 1e-5
 
@@ -32,8 +32,8 @@ make_fig2_d <- function(data, primary_2040) {
       dplyr::select("Scenario", "FromCarrier", "ToCarrier", "ToNode", "Value")
   }
   activity <- dplyr::bind_rows(
-    directed_conversion(primary_2040$psm_vff_l, "forward"),
-    directed_conversion(primary_2040$psm_vfb_l, "backward")
+    directed_conversion(primary$psm_vff_l, "forward"),
+    directed_conversion(primary$psm_vfb_l, "backward")
   ) %>%
     dplyr::mutate(
       Conversion = dplyr::case_when(
@@ -70,8 +70,8 @@ make_fig2_d <- function(data, primary_2040) {
   get_aimt <- function(scenario, variables) {
     data$aimt_iamc %>%
       dplyr::filter(
-        .data$Scenario == scenario, .data$Region == "CHN",
-        .data$Year == primary_2040$metadata$year,
+        .data$Scenario == scenario, .data$Region == "World",
+        .data$Year == primary$metadata$year,
         .data$Variable %in% variables
       ) %>%
       dplyr::summarise(Value = sum(.data$Value), .groups = "drop") %>%
@@ -81,8 +81,8 @@ make_fig2_d <- function(data, primary_2040) {
   get_psm <- function(scenario, variable) {
     data$psm_iamc %>%
       dplyr::filter(
-        .data$Scenario == scenario, .data$Region == "CHN",
-        .data$Year == primary_2040$metadata$year, .data$Variable == variable
+        .data$Scenario == scenario, .data$Region %in% PSM_WORLD_REGIONS,
+        .data$Year == primary$metadata$year, .data$Variable == variable
       ) %>%
       dplyr::summarise(Value = sum(.data$Value), .groups = "drop") %>%
       dplyr::pull("Value") %>%
@@ -95,7 +95,7 @@ make_fig2_d <- function(data, primary_2040) {
     "Fig. 2-d AIM-Technology input"
   )
 
-  audit <- dplyr::bind_rows(lapply(unname(primary_2040$metadata$scenario_map), function(scenario) {
+  audit <- dplyr::bind_rows(lapply(unname(primary$metadata$scenario_map), function(scenario) {
     h2_total <- get_aimt(scenario, "Fin_Ene_Hyd")
     nh3_demand <- get_aimt(scenario, "Fin_Ene_Hyd_Amm")
     tibble::tibble(
@@ -351,7 +351,7 @@ make_fig2_d <- function(data, primary_2040) {
     ) +
     ggplot2::scale_y_continuous(limits = c(0, y_max), expand = c(0, 0)) +
     ggplot2::labs(
-      x = NULL, y = "Energy flow in 2040 (EJ/yr)", fill = "Carrier / balance"
+      x = NULL, y = paste0("Energy flow in ", primary$metadata$year, " (EJ/yr)"), fill = "Carrier / balance"
     ) +
     MyTheme +
     ggplot2::theme(
