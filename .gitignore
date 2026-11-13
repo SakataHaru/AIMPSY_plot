@@ -5,3 +5,6 @@
 
 # Local and potentially large inputs for IntermReport figures
 /IntermReport/data/
+
+# Local GDX inputs for NH3 demand figures
+/H2demand/NH3_demand/data/**/*.gdx
